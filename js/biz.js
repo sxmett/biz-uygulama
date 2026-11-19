@@ -262,7 +262,7 @@ export function renderBiz(contentEl) {
       const reader = new FileReader();
       reader.onload = () => {
         state.myAvatar = reader.result;
-        saveState();
+        saveState({ pushCloud: true });
         renderBiz(contentEl);
       };
       reader.readAsDataURL(file);
@@ -274,7 +274,7 @@ export function renderBiz(contentEl) {
       const reader = new FileReader();
       reader.onload = () => {
         state.partnerAvatar = reader.result;
-        saveState();
+        saveState({ pushCloud: true });
         renderBiz(contentEl);
       };
       reader.readAsDataURL(file);
@@ -282,13 +282,13 @@ export function renderBiz(contentEl) {
 
     document.getElementById("remove-my-avatar")?.addEventListener("click", () => {
       state.myAvatar = null;
-      saveState();
+      saveState({ pushCloud: true });
       renderBiz(contentEl);
     });
 
     document.getElementById("remove-partner-avatar")?.addEventListener("click", () => {
       state.partnerAvatar = null;
-      saveState();
+      saveState({ pushCloud: true });
       renderBiz(contentEl);
     });
 
@@ -330,7 +330,7 @@ export function renderBiz(contentEl) {
       }
 
       isEditingCouple = false;
-      saveState();
+      saveState({ pushCloud: true });
       renderBiz(contentEl);
       showToast("miss-feedback", "İsimler, fotoğraflar, tarih ve özel gün güncellendi.");
     });
@@ -340,7 +340,7 @@ export function renderBiz(contentEl) {
     const val = document.getElementById("my-note-input").value.trim();
     if (!val) return;
     state.myNote = val;
-    saveState();
+    saveState({ pushCloud: true });
     renderBiz(contentEl);
     showToast("miss-feedback", "Notun güncellendi.");
   });
@@ -348,7 +348,7 @@ export function renderBiz(contentEl) {
   document.querySelectorAll("[data-mood]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.partnerMood = btn.dataset.mood;
-      saveState();
+      saveState({ pushCloud: true });
       renderBiz(contentEl);
       showToast("miss-feedback", `Modun "${state.partnerMood}" olarak güncellendi.`);
     });
@@ -359,7 +359,7 @@ export function renderBiz(contentEl) {
     state.myMissCount = (state.myMissCount || 0) + 1;
     state.missCount = state.myMissCount;
     state.lastMissTime = nowTime();
-    saveState();
+    saveState({ pushCloud: true });
     renderBiz(contentEl);
     showToast("miss-feedback", `"Seni çok özledim" sinyali gönderildi (${state.lastMissTime}).`);
   });
