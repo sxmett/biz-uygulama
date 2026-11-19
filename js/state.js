@@ -1,5 +1,9 @@
+import { db, ref, set, onValue } from "./firebase.js";
+
 const STORAGE_KEY = "biz_app_state_v1";
 const ADMIN_OWNER_KEY = "biz_admin_owner_v1";
+const DEVICE_ROLE_KEY = "biz_device_role_v1"; // "userA" veya "userB"
+const SHARED_ROOM_PATH = "biz_room/shared_state";
 
 export function getLocalDayKey(dateObj = new Date()) {
   const y = dateObj.getFullYear();
@@ -49,8 +53,26 @@ export const defaultState = {
   callTimer: null,
   activeReactionMsgId: null,
   messages: [
-    { id: 1, sender: "them", type: "text", text: "Selam, bugün nasıl geçiyor?", time: "10:15", status: "read", reaction: null },
-    { id: 2, sender: "me", type: "text", text: "Güzel geçiyor, seninle sohbet alanını düzenliyorum.", time: "10:16", status: "read", reaction: "❤️" }
+    {
+      id: 1,
+      sender: "them",
+      authorRole: "userB",
+      type: "text",
+      text: "Selam, bugün nasıl geçiyor?",
+      time: "10:15",
+      status: "read",
+      reaction: null
+    },
+    {
+      id: 2,
+      sender: "me",
+      authorRole: "userA",
+      type: "text",
+      text: "Güzel geçiyor, seninle sohbet alanını düzenliyorum.",
+      time: "10:16",
+      status: "read",
+      reaction: "❤️"
+    }
   ],
   pendingMemoryPhoto: null,
   confirmDeleteId: null,
@@ -77,6 +99,29 @@ function readAdminOwnerFlag() {
   }
 }
 
+export function getDeviceRole() {
+  try {
+    let role = localStorage.getItem(DEVICE_ROLE_KEY);
+    if (!role) {
+      role = window.location.hash === "#partner" ? "userB" : "userA";
+      localStorage.setItem(DEVICE_ROLE_KEY, role);
+    }
+    return role;
+  } catch {
+    return "userA";
+  }
+}
+
+export function setDeviceRole(role) {
+  const safeRole = role === "userB" ? "userB" : "userA";
+  try {
+    localStorage.setItem(DEVICE_ROLE_KEY, safeRole);
+  } catch {
+    // Sessiz geç
+  }
+  return safeRole;
+}
+
 export function setAdminOwner(enabled) {
   state.isAdminOwner = Boolean(enabled);
   try {
@@ -99,6 +144,132 @@ function loadSavedState() {
 
 const saved = loadSavedState();
 const adminFlag = readAdminOwnerFlag();
+
+function normalizeMessagesForRole(rawMessages) {
+  const myRole = getDeviceRole();
+  if (!Array.isArray(rawMessages)) return [];
+  return rawMessages.map((msg) => {
+    const authorRole =
+      msg.authorRole || (msg.sender === "me" ? "userA" : "userB");
+    return {
+      ...msg,
+      authorRole,
+      sender: authorRole === myRole ? "me" : "them"
+    };
+  });
+}
+
+function applySharedSnapshot(dataSource, fromCloud = false) {
+  if (!dataSource || typeof dataSource !== "object") return;
+
+  const nextStartDate =
+    typeof dataSource.startDate === "string" && dataSource.startDate.trim()
+      ? dataSource.startDate
+      : defaultState.startDate;
+
+  const nextSpecialEvent = {
+    title:
+      typeof dataSource.specialEvent?.title === "string" && dataSource.specialEvent.title.trim()
+        ? dataSource.specialEvent.title
+        : defaultState.specialEvent.title,
+    date:
+      typeof dataSource.specialEvent?.date === "string" && dataSource.specialEvent.date.trim()
+        ? dataSource.specialEvent.date
+        : defaultState.specialEvent.date
+  };
+
+  const nextMyLocation = {
+    ...defaultState.myLocation,
+    ...(dataSource.myLocation && typeof dataSource.myLocation === "object"
+      ? dataSource.myLocation
+      : {})
+  };
+
+  const nextPartnerLocation = {
+    ...defaultState.partnerLocation,
+    ...(dataSource.partnerLocation && typeof dataSource.partnerLocation === "object"
+      ? dataSource.partnerLocation
+      : {})
+  };
+
+  const nextMessages = Array.isArray(dataSource.messages)
+    ? normalizeMessagesForRole(dataSource.messages)
+    : JSON.parse(JSON.stringify(defaultState.messages));
+
+  const nextMemories = Array.isArray(dataSource.memories)
+    ? JSON.parse(JSON.stringify(dataSource.memories))
+    : JSON.parse(JSON.stringify(defaultState.memories));
+
+  const importedMood =
+    dataSource.partnerMood === "Kahve molasında"
+      ? "Uyuyor"
+      : typeof dataSource.partnerMood === "string" && dataSource.partnerMood.trim()
+      ? dataSource.partnerMood
+      : defaultState.partnerMood;
+
+  const todayKey = getLocalDayKey();
+  const sameDay = dataSource.missDayKey === todayKey;
+
+  state.startDate = nextStartDate;
+  state.specialEvent = nextSpecialEvent;
+
+  if (!fromCloud) {
+    state.myName =
+      typeof dataSource.myName === "string" && dataSource.myName.trim()
+        ? dataSource.myName
+        : defaultState.myName;
+    state.partnerName =
+      typeof dataSource.partnerName === "string" && dataSource.partnerName.trim()
+        ? dataSource.partnerName
+        : defaultState.partnerName;
+    state.myAvatar = typeof dataSource.myAvatar === "string" ? dataSource.myAvatar : null;
+    state.partnerAvatar =
+      typeof dataSource.partnerAvatar === "string" ? dataSource.partnerAvatar : null;
+    state.myNote =
+      typeof dataSource.myNote === "string" ? dataSource.myNote : defaultState.myNote;
+    state.myLocation = nextMyLocation;
+    state.partnerLocation = nextPartnerLocation;
+  } else {
+    // Buluttan gelen veride isim/not/konum alanlarını eşle
+    if (typeof dataSource.myName === "string" && dataSource.myName.trim()) {
+      state.partnerName = dataSource.myName;
+    }
+    if (typeof dataSource.myNote === "string") {
+      state.partnerNote = dataSource.myNote;
+    }
+    if (dataSource.myLocation && typeof dataSource.myLocation === "object") {
+      state.partnerLocation = {
+        ...defaultState.partnerLocation,
+        ...dataSource.myLocation
+      };
+    }
+  }
+
+  state.partnerMood = importedMood;
+  state.myMissCount =
+    sameDay && typeof dataSource.myMissCount === "number" && !Number.isNaN(dataSource.myMissCount)
+      ? dataSource.myMissCount
+      : 0;
+  state.partnerMissCount =
+    sameDay &&
+    typeof dataSource.partnerMissCount === "number" &&
+    !Number.isNaN(dataSource.partnerMissCount)
+      ? dataSource.partnerMissCount
+      : 0;
+  state.missDayKey = todayKey;
+  state.missCount =
+    sameDay && typeof dataSource.missCount === "number" && !Number.isNaN(dataSource.missCount)
+      ? dataSource.missCount
+      : 0;
+  state.lastMissTime =
+    typeof dataSource.lastMissTime === "string" ? dataSource.lastMissTime : null;
+  state.distanceKm =
+    typeof dataSource.distanceKm === "number" && !Number.isNaN(dataSource.distanceKm)
+      ? dataSource.distanceKm
+      : defaultState.distanceKm;
+  state.messages = nextMessages;
+  state.memories = nextMemories;
+}
 
 const initialMood =
   saved.partnerMood === "Kahve molasında"
@@ -142,7 +313,9 @@ export const state = {
       ? saved.partnerLocation
       : {})
   },
-  messages: Array.isArray(saved.messages) ? saved.messages : defaultState.messages,
+  messages: Array.isArray(saved.messages)
+    ? normalizeMessagesForRole(saved.messages)
+    : defaultState.messages,
   memories: Array.isArray(saved.memories) ? saved.memories : defaultState.memories,
   bizClockInterval: null,
   callMode: null,
@@ -154,6 +327,9 @@ export const state = {
   audioChunks: [],
   isAdminOwner: adminFlag
 };
+
+let suppressNextCloudPush = false;
+let cloudListenerStarted = false;
 
 export function syncDailyMissReset() {
   const currentKey = getLocalDayKey();
@@ -188,18 +364,61 @@ export function buildPersistPayload() {
     partnerLocation: state.partnerLocation,
     distanceKm: state.distanceKm,
     messages: state.messages,
-    memories: state.memories
+    memories: state.memories,
+    updatedBy: getDeviceRole(),
+    updatedAt: Date.now()
   };
 }
 
-export function saveState() {
+export function saveState(options = { pushCloud: true }) {
   try {
     const payload = buildPersistPayload();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    if (options.pushCloud !== false && !suppressNextCloudPush) {
+      set(ref(db, SHARED_ROOM_PATH), payload).catch(() => {});
+    }
     return true;
   } catch {
     return false;
   }
+}
+
+export function initRealtimeSync(onRemoteUpdate) {
+  if (cloudListenerStarted) return;
+  cloudListenerStarted = true;
+
+  const roomRef = ref(db, SHARED_ROOM_PATH);
+  onValue(roomRef, (snapshot) => {
+    const val = snapshot.val();
+    if (!val || typeof val !== "object") return;
+    if (val.updatedBy && val.updatedBy === getDeviceRole()) return;
+
+    suppressNextCloudPush = true;
+    applySharedSnapshot(val, true);
+
+    // Karşı tarafın gönderdiği mesajlar bu cihaza ulaştıysa 'delivered' yap
+    let changed = false;
+    if (Array.isArray(state.messages)) {
+      state.messages.forEach((m) => {
+        if (m.sender === "them" && m.status === "sent") {
+          m.status = "delivered";
+          changed = true;
+        }
+      });
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPersistPayload()));
+    } catch {
+      // Sessiz geç
+    }
+
+    suppressNextCloudPush = false;
+    if (changed) {
+      saveState({ pushCloud: true });
+    }
+    onRemoteUpdate?.();
+  });
 }
 
 export function applyImportedBackup(rawData) {
@@ -210,107 +429,11 @@ export function applyImportedBackup(rawData) {
   const dataSource =
     rawData.data && typeof rawData.data === "object" ? rawData.data : rawData;
 
-  const nextStartDate =
-    typeof dataSource.startDate === "string" && dataSource.startDate.trim()
-      ? dataSource.startDate
-      : defaultState.startDate;
-
-  const nextSpecialEvent = {
-    title:
-      typeof dataSource.specialEvent?.title === "string" && dataSource.specialEvent.title.trim()
-        ? dataSource.specialEvent.title
-        : defaultState.specialEvent.title,
-    date:
-      typeof dataSource.specialEvent?.date === "string" && dataSource.specialEvent.date.trim()
-        ? dataSource.specialEvent.date
-        : defaultState.specialEvent.date
-  };
-
-  const nextMyLocation = {
-    ...defaultState.myLocation,
-    ...(dataSource.myLocation && typeof dataSource.myLocation === "object"
-      ? dataSource.myLocation
-      : {})
-  };
-
-  const nextPartnerLocation = {
-    ...defaultState.partnerLocation,
-    ...(dataSource.partnerLocation && typeof dataSource.partnerLocation === "object"
-      ? dataSource.partnerLocation
-      : {})
-  };
-
-  const nextMessages = Array.isArray(dataSource.messages)
-    ? JSON.parse(JSON.stringify(dataSource.messages))
-    : JSON.parse(JSON.stringify(defaultState.messages));
-
-  const nextMemories = Array.isArray(dataSource.memories)
-    ? JSON.parse(JSON.stringify(dataSource.memories))
-    : JSON.parse(JSON.stringify(defaultState.memories));
-
-  const importedMood =
-    dataSource.partnerMood === "Kahve molasında"
-      ? "Uyuyor"
-      : typeof dataSource.partnerMood === "string" && dataSource.partnerMood.trim()
-      ? dataSource.partnerMood
-      : defaultState.partnerMood;
-
-  const todayKey = getLocalDayKey();
-  const backupSameDay = dataSource.missDayKey === todayKey;
-
-  state.startDate = nextStartDate;
-  state.specialEvent = nextSpecialEvent;
-  state.myName =
-    typeof dataSource.myName === "string" && dataSource.myName.trim()
-      ? dataSource.myName
-      : defaultState.myName;
-  state.partnerName =
-    typeof dataSource.partnerName === "string" && dataSource.partnerName.trim()
-      ? dataSource.partnerName
-      : defaultState.partnerName;
-  state.myAvatar = typeof dataSource.myAvatar === "string" ? dataSource.myAvatar : null;
-  state.partnerAvatar =
-    typeof dataSource.partnerAvatar === "string" ? dataSource.partnerAvatar : null;
-  state.partnerMood = importedMood;
-  state.partnerNote =
-    typeof dataSource.partnerNote === "string"
-      ? dataSource.partnerNote
-      : defaultState.partnerNote;
-  state.myNote =
-    typeof dataSource.myNote === "string" ? dataSource.myNote : defaultState.myNote;
-  state.myMissCount =
-    backupSameDay &&
-    typeof dataSource.myMissCount === "number" &&
-    !Number.isNaN(dataSource.myMissCount)
-      ? dataSource.myMissCount
-      : 0;
-  state.partnerMissCount =
-    backupSameDay &&
-    typeof dataSource.partnerMissCount === "number" &&
-    !Number.isNaN(dataSource.partnerMissCount)
-      ? dataSource.partnerMissCount
-      : 0;
-  state.missDayKey = todayKey;
-  state.missCount =
-    backupSameDay &&
-    typeof dataSource.missCount === "number" &&
-    !Number.isNaN(dataSource.missCount)
-      ? dataSource.missCount
-      : 0;
-  state.lastMissTime =
-    typeof dataSource.lastMissTime === "string" ? dataSource.lastMissTime : null;
-  state.myLocation = nextMyLocation;
-  state.partnerLocation = nextPartnerLocation;
-  state.distanceKm =
-    typeof dataSource.distanceKm === "number" && !Number.isNaN(dataSource.distanceKm)
-      ? dataSource.distanceKm
-      : defaultState.distanceKm;
-  state.messages = nextMessages;
-  state.memories = nextMemories;
+  applySharedSnapshot(dataSource, false);
   state.confirmDeleteId = null;
   state.activeReactionMsgId = null;
 
-  return saveState();
+  return saveState({ pushCloud: true });
 }
 
 export function resetAllPersistedData() {
@@ -333,12 +456,14 @@ export function resetAllPersistedData() {
     }
   });
 
+  state.messages = normalizeMessagesForRole(state.messages);
   state.missDayKey = getLocalDayKey();
   state.myMissCount = 0;
   state.partnerMissCount = 0;
   state.missCount = 0;
   state.isAdminOwner = keepAdmin;
   state.activeTab = keepAdmin ? "admin" : "biz";
+  saveState({ pushCloud: true });
 }
 
 export function nowTime() {
