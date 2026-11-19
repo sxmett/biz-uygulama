@@ -1,6 +1,6 @@
-import { state, setAdminOwner } from "./state.js";
+import { state, setAdminOwner, initRealtimeSync } from "./state.js";
 import { renderBiz, clearBizClock } from "./biz.js";
-import { renderSohbet } from "./sohbet.js";
+import { renderSohbet, markIncomingMessagesAsRead } from "./sohbet.js";
 import { renderKonum } from "./konum.js";
 import { renderAnilar } from "./anilar.js";
 import { renderAdmin } from "./admin.js";
@@ -53,6 +53,10 @@ export function renderApp() {
     clearBizClock();
   }
 
+  if (state.activeTab === "sohbet") {
+    markIncomingMessagesAsRead();
+  }
+
   if (navEl) {
     renderNav(navEl);
   }
@@ -77,4 +81,17 @@ window.addEventListener("DOMContentLoaded", () => {
     setAdminOwner(true);
   }
   renderApp();
+
+  initRealtimeSync(() => {
+    if (state.activeTab === "sohbet") {
+      markIncomingMessagesAsRead();
+      const contentEl = document.getElementById("app-content") || document.getElementById("content");
+      if (contentEl) {
+        const keepFocus = document.activeElement?.id === "msg-input";
+        renderSohbet(contentEl, keepFocus, { scrollToBottom: true, preserveScroll: false });
+      }
+    } else {
+      renderApp();
+    }
+  });
 });
