@@ -2,7 +2,7 @@ import { db, ref, set, onValue } from "./firebase.js";
 
 const STORAGE_KEY = "biz_app_state_v1";
 const ADMIN_OWNER_KEY = "biz_admin_owner_v1";
-const DEVICE_ROLE_KEY = "biz_device_role_v1"; // "userA" veya "userB"
+const DEVICE_ROLE_KEY = "biz_device_role_v1"; // "userA" (Samet) | "userB" (Emine)
 const SHARED_ROOM_PATH = "biz_room/shared_state";
 
 export function getLocalDayKey(dateObj = new Date()) {
@@ -19,8 +19,9 @@ export const defaultState = {
     title: "Yıldönümü",
     date: "2026-12-12T00:00:00"
   },
-  myName: "Sen",
-  partnerName: "Sevgilim",
+  // Ortak isimler (rol seçimine göre otomatik Samet / Emine olarak eşlenir)
+  myName: "Samet",
+  partnerName: "Emine",
   myAvatar: null,
   partnerAvatar: null,
   partnerMood: "Uyuyor",
@@ -52,6 +53,10 @@ export const defaultState = {
   callSeconds: 0,
   callTimer: null,
   activeReactionMsgId: null,
+  typingByRole: {
+    userA: false,
+    userB: false
+  },
   messages: [
     {
       id: 1,
@@ -81,7 +86,7 @@ export const defaultState = {
       id: 1,
       title: "İlk Kahve Buluşması",
       date: "14 Şubat",
-      author: "Sen",
+      author: "Samet",
       photo: null,
       note: "En sevdiğimiz köşe masası ve uzun uzun sohbet."
     }
@@ -101,14 +106,21 @@ function readAdminOwnerFlag() {
 
 export function getDeviceRole() {
   try {
-    let role = localStorage.getItem(DEVICE_ROLE_KEY);
-    if (!role) {
-      role = window.location.hash === "#partner" ? "userB" : "userA";
-      localStorage.setItem(DEVICE_ROLE_KEY, role);
-    }
-    return role;
+    const r = localStorage.getItem(DEVICE_ROLE_KEY);
+    return r === "userA" || r === "userB" ? r : null;
   } catch {
-    return "userA";
+    return null;
+  }
+}
+
+export function applyRoleNamesToState() {
+  const role = getDeviceRole() || "userA";
+  if (role === "userB") {
+    state.myName = "Emine";
+    state.partnerName = "Samet";
+  } else {
+    state.myName = "Samet";
+    state.partnerName = "Emine";
   }
 }
 
@@ -119,6 +131,9 @@ export function setDeviceRole(role) {
   } catch {
     // Sessiz geç
   }
+  applyRoleNamesToState();
+  state.messages = normalizeMessagesForRole(state.messages);
+  saveState({ pushCloud: true });
   return safeRole;
 }
 
@@ -142,15 +157,11 @@ function loadSavedState() {
   }
 }
 
-const saved = loadSavedState();
-const adminFlag = readAdminOwnerFlag();
-
 function normalizeMessagesForRole(rawMessages) {
-  const myRole = getDeviceRole();
+  const myRole = getDeviceRole() || "userA";
   if (!Array.isArray(rawMessages)) return [];
   return rawMessages.map((msg) => {
-    const authorRole =
-      msg.authorRole || (msg.sender === "me" ? "userA" : "userB");
+    const authorRole = msg.authorRole || (msg.sender === "me" ? "userA" : "userB");
     return {
       ...msg,
       authorRole,
@@ -159,8 +170,10 @@ function normalizeMessagesForRole(rawMessages) {
   });
 }
 
-function applySharedSnapshot(dataSource, fromCloud = false) {
+function applySharedSnapshot(dataSource) {
   if (!dataSource || typeof dataSource !== "object") return;
+
+  const myRole = getDeviceRole() || "userA";
 
   const nextStartDate =
     typeof dataSource.startDate === "string" && dataSource.startDate.trim()
@@ -194,7 +207,7 @@ function applySharedSnapshot(dataSource, fromCloud = false) {
 
   const nextMessages = Array.isArray(dataSource.messages)
     ? normalizeMessagesForRole(dataSource.messages)
-    : JSON.parse(JSON.stringify(defaultState.messages));
+    : normalizeMessagesForRole(defaultState.messages);
 
   const nextMemories = Array.isArray(dataSource.memories)
     ? JSON.parse(JSON.stringify(dataSource.memories))
@@ -212,39 +225,16 @@ function applySharedSnapshot(dataSource, fromCloud = false) {
 
   state.startDate = nextStartDate;
   state.specialEvent = nextSpecialEvent;
+  state.myName = myRole === "userB" ? "Emine" : "Samet";
+  state.partnerName = myRole === "userB" ? "Samet" : "Emine";
 
-  if (!fromCloud) {
-    state.myName =
-      typeof dataSource.myName === "string" && dataSource.myName.trim()
-        ? dataSource.myName
-        : defaultState.myName;
-    state.partnerName =
-      typeof dataSource.partnerName === "string" && dataSource.partnerName.trim()
-        ? dataSource.partnerName
-        : defaultState.partnerName;
-    state.myAvatar = typeof dataSource.myAvatar === "string" ? dataSource.myAvatar : null;
-    state.partnerAvatar =
-      typeof dataSource.partnerAvatar === "string" ? dataSource.partnerAvatar : null;
-    state.myNote =
-      typeof dataSource.myNote === "string" ? dataSource.myNote : defaultState.myNote;
-    state.myLocation = nextMyLocation;
-    state.partnerLocation = nextPartnerLocation;
-  } else {
-    // Buluttan gelen veride isim/not/konum alanlarını eşle
-    if (typeof dataSource.myName === "string" && dataSource.myName.trim()) {
-      state.partnerName = dataSource.myName;
-    }
-    if (typeof dataSource.myNote === "string") {
-      state.partnerNote = dataSource.myNote;
-    }
-    if (dataSource.myLocation && typeof dataSource.myLocation === "object") {
-      state.partnerLocation = {
-        ...defaultState.partnerLocation,
-        ...dataSource.myLocation
-      };
-    }
-  }
+  if (typeof dataSource.myAvatar === "string") state.myAvatar = dataSource.myAvatar;
+  if (typeof dataSource.partnerAvatar === "string") state.partnerAvatar = dataSource.partnerAvatar;
+  if (typeof dataSource.myNote === "string") state.myNote = dataSource.myNote;
+  if (typeof dataSource.partnerNote === "string") state.partnerNote = dataSource.partnerNote;
 
+  state.myLocation = nextMyLocation;
+  state.partnerLocation = nextPartnerLocation;
   state.partnerMood = importedMood;
   state.myMissCount =
     sameDay && typeof dataSource.myMissCount === "number" && !Number.isNaN(dataSource.myMissCount)
@@ -269,7 +259,14 @@ function applySharedSnapshot(dataSource, fromCloud = false) {
       : defaultState.distanceKm;
   state.messages = nextMessages;
   state.memories = nextMemories;
+  state.typingByRole = {
+    userA: Boolean(dataSource.typingByRole?.userA),
+    userB: Boolean(dataSource.typingByRole?.userB)
+  };
 }
+
+const saved = loadSavedState();
+const adminFlag = readAdminOwnerFlag();
 
 const initialMood =
   saved.partnerMood === "Kahve molasında"
@@ -315,8 +312,12 @@ export const state = {
   },
   messages: Array.isArray(saved.messages)
     ? normalizeMessagesForRole(saved.messages)
-    : defaultState.messages,
+    : normalizeMessagesForRole(defaultState.messages),
   memories: Array.isArray(saved.memories) ? saved.memories : defaultState.memories,
+  typingByRole: {
+    userA: Boolean(saved.typingByRole?.userA),
+    userB: Boolean(saved.typingByRole?.userB)
+  },
   bizClockInterval: null,
   callMode: null,
   callSeconds: 0,
@@ -328,6 +329,8 @@ export const state = {
   isAdminOwner: adminFlag
 };
 
+applyRoleNamesToState();
+
 let suppressNextCloudPush = false;
 let cloudListenerStarted = false;
 
@@ -338,7 +341,7 @@ export function syncDailyMissReset() {
     state.myMissCount = 0;
     state.partnerMissCount = 0;
     state.missCount = 0;
-    saveState();
+    saveState({ pushCloud: true });
     return true;
   }
   return false;
@@ -365,7 +368,8 @@ export function buildPersistPayload() {
     distanceKm: state.distanceKm,
     messages: state.messages,
     memories: state.memories,
-    updatedBy: getDeviceRole(),
+    typingByRole: state.typingByRole || { userA: false, userB: false },
+    updatedBy: getDeviceRole() || "userA",
     updatedAt: Date.now()
   };
 }
@@ -383,6 +387,25 @@ export function saveState(options = { pushCloud: true }) {
   }
 }
 
+export function setMyTypingStatus(isTyping) {
+  const myRole = getDeviceRole();
+  if (!myRole) return;
+  const current = Boolean(state.typingByRole?.[myRole]);
+  if (current === Boolean(isTyping)) return;
+  state.typingByRole = {
+    ...(state.typingByRole || { userA: false, userB: false }),
+    [myRole]: Boolean(isTyping)
+  };
+  saveState({ pushCloud: true });
+}
+
+export function isPartnerTyping() {
+  const myRole = getDeviceRole();
+  if (!myRole) return false;
+  const partnerRole = myRole === "userA" ? "userB" : "userA";
+  return Boolean(state.typingByRole?.[partnerRole]);
+}
+
 export function initRealtimeSync(onRemoteUpdate) {
   if (cloudListenerStarted) return;
   cloudListenerStarted = true;
@@ -391,10 +414,9 @@ export function initRealtimeSync(onRemoteUpdate) {
   onValue(roomRef, (snapshot) => {
     const val = snapshot.val();
     if (!val || typeof val !== "object") return;
-    if (val.updatedBy && val.updatedBy === getDeviceRole()) return;
 
     suppressNextCloudPush = true;
-    applySharedSnapshot(val, true);
+    applySharedSnapshot(val);
 
     // Karşı tarafın gönderdiği mesajlar bu cihaza ulaştıysa 'delivered' yap
     let changed = false;
@@ -429,7 +451,7 @@ export function applyImportedBackup(rawData) {
   const dataSource =
     rawData.data && typeof rawData.data === "object" ? rawData.data : rawData;
 
-  applySharedSnapshot(dataSource, false);
+  applySharedSnapshot(dataSource);
   state.confirmDeleteId = null;
   state.activeReactionMsgId = null;
 
@@ -456,6 +478,7 @@ export function resetAllPersistedData() {
     }
   });
 
+  applyRoleNamesToState();
   state.messages = normalizeMessagesForRole(state.messages);
   state.missDayKey = getLocalDayKey();
   state.myMissCount = 0;
