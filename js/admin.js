@@ -212,7 +212,7 @@ export function renderAdmin(contentEl, onTabChange) {
 
     if (action.type === "clear_chat") {
       state.messages = [];
-      saveState();
+      saveState({ pushCloud: true });
       renderAdmin(contentEl, onTabChange);
       showToast("admin-feedback", "Sohbet mesajları temizlendi.");
       return;
@@ -221,7 +221,7 @@ export function renderAdmin(contentEl, onTabChange) {
     if (action.type === "clear_memories") {
       state.memories = [];
       state.confirmDeleteId = null;
-      saveState();
+      saveState({ pushCloud: true });
       renderAdmin(contentEl, onTabChange);
       showToast("admin-feedback", "Tüm anılar temizlendi.");
       return;
