@@ -1,4 +1,11 @@
-import { state, nowTime, saveState, getDeviceRole } from "./state.js";
+import {
+  state,
+  nowTime,
+  saveState,
+  getDeviceRole,
+  setMyTypingStatus,
+  isPartnerTyping
+} from "./state.js";
 
 const EMOJIS = [
   "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "😉",
@@ -34,6 +41,7 @@ let micMuted = false;
 let camOff = false;
 let callErrorMsg = "";
 let replyingToMsgId = null;
+let typingStopTimeout = null;
 
 let peerModalOpen = false;
 let peerModalTab = "search"; // "search" | "media"
@@ -63,7 +71,7 @@ function addSystemCallNotice(text) {
   state.messages.push({
     id: Date.now() + Math.floor(Math.random() * 100),
     sender: "me",
-    authorRole: getDeviceRole(),
+    authorRole: getDeviceRole() || "userA",
     type: "call",
     text,
     time: nowTime(),
@@ -177,7 +185,7 @@ function blobToDataUrl(blob) {
 }
 
 function getSenderLabel(sender) {
-  return sender === "me" ? state.myName || "Sen" : state.partnerName || "Sevgilim";
+  return sender === "me" ? state.myName || "Samet" : state.partnerName || "Emine";
 }
 
 function getMessagePreviewText(msg) {
@@ -202,15 +210,17 @@ function scrollToAndHighlightMessage(msgId) {
 function renderReceipt(msg) {
   if (msg.sender !== "me") return "";
 
+  // Okunduğunda / görüldüğünde WhatsApp tarzı mavi tik
   if (msg.status === "read") {
     return `
-      <svg class="tick-svg read" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" title="Görüldü">
+      <svg class="tick-svg read" style="color:#34b7f1;" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" title="Görüldü">
         <path d="M2 8.5L6.5 13L15 3.5" />
         <path d="M8.5 8.5L13 13L21.5 3.5" />
       </svg>
     `;
   }
 
+  // İletildiğinde çift tik
   if (msg.status === "delivered") {
     return `
       <svg class="tick-svg delivered" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" title="İletildi">
@@ -220,6 +230,7 @@ function renderReceipt(msg) {
     `;
   }
 
+  // Gönderildiğinde tek tik
   return `
     <svg class="tick-svg sent" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" title="Gönderildi">
       <path d="M3 8.5L7.5 13L17 3.5" />
@@ -406,7 +417,7 @@ function handlePeerModalEsc(e) {
 function renderPeerInfoModal(contentEl) {
   if (!peerModalOpen) return;
 
-  const partnerLabel = state.partnerName || "Sevgilim";
+  const partnerLabel = state.partnerName || "Emine";
   const bodyHtml =
     peerModalTab === "search"
       ? `
@@ -605,7 +616,11 @@ export function renderSohbet(
   const isRinging = state.callMode && callPhase === "ringing";
   const isConnected = state.callMode && callPhase === "connected";
   const isIncomingCall = isRinging && callDirection === "incoming";
-  const partnerLabel = state.partnerName || "Sevgilim";
+  const partnerLabel = state.partnerName || "Emine";
+  const partnerIsTypingNow = isPartnerTyping();
+  const subStatusText = partnerIsTypingNow
+    ? "yazıyor..."
+    : `${state.partnerMood} · ${Number(state.distanceKm).toFixed(1)} km`;
   const callKindText = state.callMode === "video" ? "görüntülü" : "sesli";
 
   const incomingCardHtml = isIncomingCall
@@ -717,7 +732,7 @@ export function renderSohbet(
           <div class="avatar-circle">${partnerLabel[0]}</div>
           <div>
             <span class="peer-name-trigger" id="open-peer-sheet-btn">${partnerLabel}</span>
-            <div class="peer-sub">${state.partnerMood} · ${Number(state.distanceKm).toFixed(1)} km</div>
+            <div class="peer-sub" id="peer-live-sub">${subStatusText}</div>
           </div>
         </div>
         <div class="call-actions">
@@ -785,6 +800,17 @@ export function renderSohbet(
     inputEl.focus();
     inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
   }
+
+  inputEl.addEventListener("input", () => {
+    const hasText = inputEl.value.trim().length > 0;
+    setMyTypingStatus(hasText);
+    clearTimeout(typingStopTimeout);
+    if (hasText) {
+      typingStopTimeout = setTimeout(() => {
+        setMyTypingStatus(false);
+      }, 1500);
+    }
+  });
 
   const panel = document.getElementById("messages-panel");
   if (scrollOpts.preserveScroll) {
@@ -935,6 +961,7 @@ export function renderSohbet(
       const end = input.selectionEnd ?? input.value.length;
       const em = emBtn.dataset.emoji;
       input.value = input.value.slice(0, start) + em + input.value.slice(end);
+      setMyTypingStatus(input.value.trim().length > 0);
       input.focus();
       input.setSelectionRange(start + em.length, start + em.length);
     });
@@ -1096,7 +1123,7 @@ export function renderSohbet(
           state.messages.push({
             id: Date.now() + Math.floor(Math.random() * 100),
             sender: "me",
-            authorRole: getDeviceRole(),
+            authorRole: getDeviceRole() || "userA",
             type: "audio",
             src: audioDataUrl,
             time: nowTime(),
@@ -1105,6 +1132,7 @@ export function renderSohbet(
             replyTo: replyPayload
           });
           replyingToMsgId = null;
+          setMyTypingStatus(false);
           saveState({ pushCloud: true });
           renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
         }
@@ -1136,7 +1164,7 @@ export function renderSohbet(
     const newMsg = {
       id: Date.now() + Math.floor(Math.random() * 100),
       sender: "me",
-      authorRole: getDeviceRole(),
+      authorRole: getDeviceRole() || "userA",
       type: hasPhoto ? "image" : "text",
       text: text || "",
       src: hasPhoto ? state.pendingPhoto : null,
@@ -1146,10 +1174,12 @@ export function renderSohbet(
       replyTo: replyPayload
     };
 
+    clearTimeout(typingStopTimeout);
     state.messages.push(newMsg);
     state.pendingPhoto = null;
     replyingToMsgId = null;
     if (currentInput) currentInput.value = "";
+    setMyTypingStatus(false);
 
     saveState({ pushCloud: true });
     renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
