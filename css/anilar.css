@@ -1,0 +1,195 @@
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.mem-textarea {
+  min-height: 86px;
+  resize: vertical;
+  padding-right: 14px;
+  line-height: 1.45;
+}
+
+.mem-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memory-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+}
+
+.memory-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(225, 29, 72, 0.05);
+}
+
+.memory-photo {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  display: block;
+  cursor: zoom-in;
+}
+
+.memory-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memory-title {
+  font-size: 1.12rem;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.memory-note {
+  font-size: 0.95rem;
+  color: var(--muted);
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.memory-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.memory-author {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.empty-memories-card {
+  text-align: center;
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.delete-btn {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  padding: 7px 12px;
+  border-radius: 11px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.delete-btn:hover {
+  color: var(--accent);
+  background: var(--surface-soft);
+  border-color: var(--accent-soft);
+}
+
+.confirm-box {
+  background: var(--surface-soft);
+  border: 1px solid var(--accent-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Anı fotoğrafları için tam ekran yakınlaştırma penceresi */
+.anilar-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 14, 0.92);
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+}
+
+.anilar-lightbox-bar {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  z-index: 2;
+}
+
+.anilar-lightbox-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.anilar-lightbox-btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  padding: 8px 13px;
+  border-radius: 12px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.anilar-lightbox-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.anilar-lightbox-stage {
+  flex: 1;
+  width: 100%;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0;
+}
+
+.anilar-lightbox-img {
+  max-width: 100%;
+  max-height: 78vh;
+  border-radius: 12px;
+  transform-origin: center center;
+  transition: transform 0.14s ease;
+  cursor: zoom-in;
+  user-select: none;
+}
+
+.anilar-lightbox-img.zoomed {
+  cursor: zoom-out;
+}
