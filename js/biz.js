@@ -357,6 +357,7 @@ export function renderBiz(contentEl) {
   document.getElementById("miss-btn").addEventListener("click", () => {
     syncDailyMissReset();
     state.myMissCount = (state.myMissCount || 0) + 1;
+    state.partnerMissCount = state.myMissCount;
     state.missCount = state.myMissCount;
     state.lastMissTime = nowTime();
     saveState({ pushCloud: true });
