@@ -1,4 +1,4 @@
-import { state, nowTime, saveState } from "./state.js";
+import { state, nowTime, saveState, getDeviceRole } from "./state.js";
 
 const EMOJIS = [
   "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "😉",
@@ -39,6 +39,19 @@ let peerModalOpen = false;
 let peerModalTab = "search"; // "search" | "media"
 let peerSearchQuery = "";
 
+export function markIncomingMessagesAsRead() {
+  let updated = false;
+  state.messages.forEach((msg) => {
+    if (msg.sender === "them" && msg.status !== "read") {
+      msg.status = "read";
+      updated = true;
+    }
+  });
+  if (updated) {
+    saveState({ pushCloud: true });
+  }
+}
+
 function formatCallTime(totalSec) {
   const safeSec = Math.max(0, Math.floor(totalSec));
   const mins = String(Math.floor(safeSec / 60)).padStart(2, "0");
@@ -50,13 +63,14 @@ function addSystemCallNotice(text) {
   state.messages.push({
     id: Date.now() + Math.floor(Math.random() * 100),
     sender: "me",
+    authorRole: getDeviceRole(),
     type: "call",
     text,
     time: nowTime(),
     status: "read",
     reaction: null
   });
-  saveState();
+  saveState({ pushCloud: true });
 }
 
 function appendCallLogMessage(mode, seconds, status = "ended") {
@@ -190,7 +204,7 @@ function renderReceipt(msg) {
 
   if (msg.status === "read") {
     return `
-      <svg class="tick-svg read" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" title="Okundu">
+      <svg class="tick-svg read" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" title="Görüldü">
         <path d="M2 8.5L6.5 13L15 3.5" />
         <path d="M8.5 8.5L13 13L21.5 3.5" />
       </svg>
@@ -211,30 +225,6 @@ function renderReceipt(msg) {
       <path d="M3 8.5L7.5 13L17 3.5" />
     </svg>
   `;
-}
-
-function scheduleOutgoingReceipt(msgId, contentEl) {
-  setTimeout(() => {
-    const msg = state.messages.find((m) => m.id === msgId);
-    if (!msg) return;
-    msg.status = "delivered";
-    saveState();
-    if (state.activeTab === "sohbet") {
-      const keepFocus = document.activeElement?.id === "msg-input";
-      renderSohbet(contentEl, keepFocus, { scrollToBottom: false, preserveScroll: true });
-    }
-  }, 550);
-
-  setTimeout(() => {
-    const msg = state.messages.find((m) => m.id === msgId);
-    if (!msg) return;
-    msg.status = "read";
-    saveState();
-    if (state.activeTab === "sohbet") {
-      const keepFocus = document.activeElement?.id === "msg-input";
-      renderSohbet(contentEl, keepFocus, { scrollToBottom: false, preserveScroll: true });
-    }
-  }, 1750);
 }
 
 function openPhotoLightbox(src) {
@@ -523,6 +513,8 @@ export function renderSohbet(
   focusInputAfterRender = false,
   scrollOpts = { scrollToBottom: true, preserveScroll: false }
 ) {
+  markIncomingMessagesAsRead();
+
   const prevInput = document.getElementById("msg-input");
   const draftText = prevInput ? prevInput.value : "";
   const prevPanel = document.getElementById("messages-panel");
@@ -926,7 +918,7 @@ export function renderSohbet(
       if (!msg) return;
       msg.reaction = msg.reaction === emoji ? null : emoji;
       state.activeReactionMsgId = null;
-      saveState();
+      saveState({ pushCloud: true });
       renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
     });
   });
@@ -997,66 +989,53 @@ export function renderSohbet(
     }
   };
 
-  document.getElementById("voice-call-btn").addEventListener("click", () => startOutgoingCall("voice"));
-  document.getElementById("video-call-btn").addEventListener("click", () => startOutgoingCall("video"));
+  document.getElementById("voice-call-btn")?.addEventListener("click", () => startOutgoingCall("voice"));
+  document.getElementById("video-call-btn")?.addEventListener("click", () => startOutgoingCall("video"));
 
-  const acceptCallBtn = document.getElementById("accept-call-btn");
-  if (acceptCallBtn) {
-    acceptCallBtn.addEventListener("click", () => {
-      if (!state.callMode || callPhase !== "ringing") return;
-      beginCallConversationTimer(contentEl);
-    });
-  }
+  document.getElementById("accept-call-btn")?.addEventListener("click", () => {
+    beginCallConversationTimer(contentEl);
+  });
 
-  const rejectCallBtn = document.getElementById("reject-call-btn");
-  if (rejectCallBtn) {
-    rejectCallBtn.addEventListener("click", () => {
-      if (!state.callMode) return;
-      finishUnansweredCall(contentEl, state.callMode);
-    });
-  }
+  document.getElementById("reject-call-btn")?.addEventListener("click", () => {
+    const mode = state.callMode || "voice";
+    finishUnansweredCall(contentEl, mode);
+  });
 
-  const toggleMicBtn = document.getElementById("toggle-mic-btn");
-  if (toggleMicBtn) {
-    toggleMicBtn.addEventListener("click", () => {
-      if (!callStream) return;
-      micMuted = !micMuted;
-      callStream.getAudioTracks().forEach((track) => {
-        track.enabled = !micMuted;
+  document.getElementById("end-call-btn")?.addEventListener("click", () => {
+    const mode = state.callMode || "voice";
+    const wasConnected = callPhase === "connected";
+    const elapsed = state.callSeconds;
+    stopCallMediaAndTimers();
+    state.callMode = null;
+    if (wasConnected) {
+      appendCallLogMessage(mode, elapsed, "ended");
+    } else {
+      appendCallLogMessage(mode, 0, "missed");
+    }
+    renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
+  });
+
+  document.getElementById("toggle-mic-btn")?.addEventListener("click", () => {
+    micMuted = !micMuted;
+    if (callStream) {
+      callStream.getAudioTracks().forEach((t) => {
+        t.enabled = !micMuted;
       });
-      renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
-    });
-  }
+    }
+    renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
+  });
 
-  const toggleCamBtn = document.getElementById("toggle-cam-btn");
-  if (toggleCamBtn) {
-    toggleCamBtn.addEventListener("click", () => {
-      if (!callStream) return;
-      camOff = !camOff;
-      callStream.getVideoTracks().forEach((track) => {
-        track.enabled = !camOff;
+  document.getElementById("toggle-cam-btn")?.addEventListener("click", () => {
+    camOff = !camOff;
+    if (callStream) {
+      callStream.getVideoTracks().forEach((t) => {
+        t.enabled = !camOff;
       });
-      renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
-    });
-  }
+    }
+    renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
+  });
 
-  const endBtn = document.getElementById("end-call-btn");
-  if (endBtn) {
-    endBtn.addEventListener("click", () => {
-      const closedMode = state.callMode;
-      const wasRinging = callPhase === "ringing";
-      const finalDuration = state.callSeconds;
-      state.callMode = null;
-      callErrorMsg = "";
-      stopCallMediaAndTimers();
-      if (closedMode) {
-        appendCallLogMessage(closedMode, finalDuration, wasRinging ? "missed" : "ended");
-      }
-      renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
-    });
-  }
-
-  document.getElementById("photo-input").addEventListener("change", (e) => {
+  document.getElementById("photo-input")?.addEventListener("change", (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -1067,141 +1046,121 @@ export function renderSohbet(
     reader.readAsDataURL(file);
   });
 
-  const clearPhotoBtn = document.getElementById("clear-photo-btn");
-  if (clearPhotoBtn) {
-    clearPhotoBtn.addEventListener("click", () => {
-      state.pendingPhoto = null;
-      renderSohbet(contentEl, true, { scrollToBottom: false, preserveScroll: true });
-    });
-  }
-
-  const buildReplyPayload = () => {
-    if (!replyingToMsgId) return null;
-    const target = state.messages.find((m) => m.id === replyingToMsgId);
-    if (!target) return null;
-    return {
-      id: target.id,
-      author: getSenderLabel(target.sender),
-      text: getMessagePreviewText(target)
-    };
-  };
-
-  const sendMessage = () => {
-    const input = document.getElementById("msg-input");
-    const text = input.value.trim();
-    const replyPayload = buildReplyPayload();
-
-    if (state.pendingPhoto) {
-      const newId = Date.now();
-      state.messages.push({
-        id: newId,
-        sender: "me",
-        type: "image",
-        src: state.pendingPhoto,
-        text,
-        time: nowTime(),
-        status: "sent",
-        reaction: null,
-        replyTo: replyPayload
-      });
-      state.pendingPhoto = null;
-      state.emojiPickerOpen = false;
-      state.activeReactionMsgId = null;
-      replyingToMsgId = null;
-      input.value = "";
-      saveState();
-      renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
-      scheduleOutgoingReceipt(newId, contentEl);
-      return;
-    }
-
-    if (!text) {
-      input.focus();
-      return;
-    }
-
-    const newId = Date.now();
-    state.messages.push({
-      id: newId,
-      sender: "me",
-      type: "text",
-      text,
-      time: nowTime(),
-      status: "sent",
-      reaction: null,
-      replyTo: replyPayload
-    });
-    state.emojiPickerOpen = false;
-    state.activeReactionMsgId = null;
-    replyingToMsgId = null;
-    input.value = "";
-    saveState();
-    renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
-    scheduleOutgoingReceipt(newId, contentEl);
-  };
-
-  document.getElementById("send-msg-btn").addEventListener("click", sendMessage);
-  inputEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendMessage();
+  document.getElementById("clear-photo-btn")?.addEventListener("click", () => {
+    state.pendingPhoto = null;
+    renderSohbet(contentEl, true, { scrollToBottom: false, preserveScroll: true });
   });
 
   const recordBtn = document.getElementById("record-btn");
   const recordStatus = document.getElementById("record-status");
 
-  recordBtn.addEventListener("click", async () => {
+  recordBtn?.addEventListener("click", async () => {
     if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
       state.mediaRecorder.stop();
-      recordBtn.classList.remove("recording");
-      recordBtn.textContent = "Ses Kaydet";
-      recordStatus.textContent = "";
       return;
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      recordStatus.textContent = "Bu tarayıcıda ses kaydı desteklenmiyor.";
+      if (recordStatus) recordStatus.textContent = "Mikrofon desteklenmiyor.";
       return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      state.audioChunks = [];
       const recorder = new MediaRecorder(stream);
+      state.audioChunks = [];
       state.mediaRecorder = recorder;
 
       recorder.ondataavailable = (ev) => {
-        if (ev.data.size > 0) state.audioChunks.push(ev.data);
+        if (ev.data && ev.data.size > 0) {
+          state.audioChunks.push(ev.data);
+        }
       };
 
       recorder.onstop = async () => {
-        const mimeType = recorder.mimeType || "audio/webm";
-        const blob = new Blob(state.audioChunks, { type: mimeType });
-        stream.getTracks().forEach((track) => track.stop());
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(state.audioChunks, { type: recorder.mimeType || "audio/webm" });
+        state.audioChunks = [];
+        state.mediaRecorder = null;
 
-        const audioDataUrl = await blobToDataUrl(blob);
-        const replyPayload = buildReplyPayload();
-        const newId = Date.now();
-        state.messages.push({
-          id: newId,
-          sender: "me",
-          type: "audio",
-          src: audioDataUrl,
-          time: nowTime(),
-          status: "sent",
-          reaction: null,
-          replyTo: replyPayload
-        });
-        replyingToMsgId = null;
-        saveState();
-        renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
-        scheduleOutgoingReceipt(newId, contentEl);
+        if (blob.size > 0) {
+          const audioDataUrl = await blobToDataUrl(blob);
+          const replyPayload = activeReplyMsg
+            ? {
+                id: activeReplyMsg.id,
+                author: getSenderLabel(activeReplyMsg.sender),
+                text: getMessagePreviewText(activeReplyMsg)
+              }
+            : null;
+
+          state.messages.push({
+            id: Date.now() + Math.floor(Math.random() * 100),
+            sender: "me",
+            authorRole: getDeviceRole(),
+            type: "audio",
+            src: audioDataUrl,
+            time: nowTime(),
+            status: "sent",
+            reaction: null,
+            replyTo: replyPayload
+          });
+          replyingToMsgId = null;
+          saveState({ pushCloud: true });
+          renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
+        }
       };
 
       recorder.start();
-      recordBtn.classList.add("recording");
-      recordBtn.textContent = "Kaydı Bitir";
-      recordStatus.textContent = "Ses kaydediliyor...";
+      if (recordStatus) recordStatus.textContent = "Kaydediliyor... (Bitirmek için tekrar bas)";
+      recordBtn.textContent = "Kaydı Durdur";
     } catch {
-      recordStatus.textContent = "Mikrofon izni verilmedi.";
+      if (recordStatus) recordStatus.textContent = "Mikrofon izni verilmedi.";
+    }
+  });
+
+  const sendCurrentMessage = () => {
+    const currentInput = document.getElementById("msg-input");
+    const text = (currentInput ? currentInput.value : "").trim();
+    const hasPhoto = Boolean(state.pendingPhoto);
+
+    if (!text && !hasPhoto) return;
+
+    const replyPayload = activeReplyMsg
+      ? {
+          id: activeReplyMsg.id,
+          author: getSenderLabel(activeReplyMsg.sender),
+          text: getMessagePreviewText(activeReplyMsg)
+        }
+      : null;
+
+    const newMsg = {
+      id: Date.now() + Math.floor(Math.random() * 100),
+      sender: "me",
+      authorRole: getDeviceRole(),
+      type: hasPhoto ? "image" : "text",
+      text: text || "",
+      src: hasPhoto ? state.pendingPhoto : null,
+      time: nowTime(),
+      status: "sent",
+      reaction: null,
+      replyTo: replyPayload
+    };
+
+    state.messages.push(newMsg);
+    state.pendingPhoto = null;
+    replyingToMsgId = null;
+    if (currentInput) currentInput.value = "";
+
+    saveState({ pushCloud: true });
+    renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
+  };
+
+  document.getElementById("send-msg-btn")?.addEventListener("click", sendCurrentMessage);
+
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendCurrentMessage();
     }
   });
 }
