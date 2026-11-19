@@ -239,7 +239,7 @@ export function renderAnilar(contentEl) {
     state.confirmDeleteId = null;
     titleInput.value = "";
     noteInput.value = "";
-    saveState();
+    saveState({ pushCloud: true });
     renderAnilar(contentEl);
   });
 
@@ -255,7 +255,7 @@ export function renderAnilar(contentEl) {
       const id = Number(confBtn.dataset.confirmDel);
       state.memories = state.memories.filter((m) => m.id !== id);
       state.confirmDeleteId = null;
-      saveState();
+      saveState({ pushCloud: true });
       renderAnilar(contentEl);
     });
   });
