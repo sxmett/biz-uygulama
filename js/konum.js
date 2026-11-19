@@ -63,6 +63,8 @@ function buildMapLinkHtml(loc, labelText) {
 }
 
 export function renderKonum(contentEl) {
+  refreshDistanceIfPossible();
+
   const prevManualInput = document.getElementById("manual-loc-input")?.value;
   const myLabelText = state.myLocation?.label || "Henüz yazılmadı";
   const myUpdatedText = state.myLocation?.updatedAt || "Henüz güncellenmedi";
@@ -143,7 +145,7 @@ export function renderKonum(contentEl) {
       updatedAt: nowTime()
     };
     refreshDistanceIfPossible();
-    saveState();
+    saveState({ pushCloud: true });
     renderKonum(contentEl);
     showToast("loc-feedback", `Konumun "${val}" olarak kaydedildi.`);
   };
@@ -176,7 +178,7 @@ export function renderKonum(contentEl) {
           updatedAt: nowTime()
         };
         refreshDistanceIfPossible();
-        saveState();
+        saveState({ pushCloud: true });
         renderKonum(contentEl);
         showToast("loc-feedback", `Konum güncellendi: ${placeName}`);
       },
