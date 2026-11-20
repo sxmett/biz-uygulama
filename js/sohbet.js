@@ -33,8 +33,8 @@ const QUICK_REACTIONS = ["❤️", "😂", "😍", "🥺", "🔥"];
 const RING_TIMEOUT_SECONDS = 60;
 
 let callStream = null;
-let callPhase = null; // null | "ringing" | "connected"
-let callDirection = null; // null | "outgoing" | "incoming"
+let callPhase = null;
+let callDirection = null;
 let ringSecondsLeft = RING_TIMEOUT_SECONDS;
 let ringTimer = null;
 let isStartingCall = false;
@@ -45,7 +45,7 @@ let replyingToMsgId = null;
 let typingStopTimeout = null;
 
 let peerModalOpen = false;
-let peerModalTab = "search"; // "search" | "media"
+let peerModalTab = "search";
 let peerSearchQuery = "";
 
 export function markIncomingMessagesAsRead() {
@@ -239,28 +239,31 @@ function renderReceipt(msg) {
   `;
 }
 
-function openChatPhotoGallery(clickedSrc) {
-  const gallery = [];
-  if (state.pendingPhoto) {
-    gallery.push({
-      src: state.pendingPhoto,
-      title: "Gönderilecek fotoğraf önizlemesi"
-    });
-  }
-  state.messages
+// Sohbet önizlemesi kendi başına ayrı açılır (sohbet fotoğraflarıyla karışmaz)
+function openChatPreviewOnly() {
+  if (!state.pendingPhoto) return;
+  openGalleryLightbox(
+    [{ src: state.pendingPhoto, title: "Sohbet fotoğraf önizlemesi" }],
+    0
+  );
+}
+
+// Gönderilmiş sohbet fotoğrafları kendi arasında ayrı açılır (önizlemeyle karışmaz)
+function openSentChatPhotosGallery(clickedSrc) {
+  const sentPhotos = state.messages
     .filter((m) => m.type === "image" && m.src)
-    .forEach((m) => {
-      gallery.push({
-        src: m.src,
-        title: m.text || `Sohbet fotoğrafı · ${m.time || ""}`
-      });
-    });
+    .map((m) => ({
+      src: m.src,
+      title: m.text || `Sohbet fotoğrafı · ${m.time || ""}`
+    }));
+
+  if (sentPhotos.length === 0) return;
 
   const idx = Math.max(
     0,
-    gallery.findIndex((item) => item.src === clickedSrc)
+    sentPhotos.findIndex((item) => item.src === clickedSrc)
   );
-  openGalleryLightbox(gallery, idx);
+  openGalleryLightbox(sentPhotos, idx);
 }
 
 function buildSearchResultsHtml(query) {
@@ -433,7 +436,7 @@ function renderPeerInfoModal(contentEl) {
     document.querySelectorAll("[data-open-media-photo]").forEach((imgEl) => {
       imgEl.addEventListener("click", (e) => {
         e.stopPropagation();
-        openChatPhotoGallery(imgEl.dataset.openMediaPhoto);
+        openSentChatPhotosGallery(imgEl.dataset.openMediaPhoto);
       });
     });
   };
@@ -766,13 +769,13 @@ export function renderSohbet(
 
   document.getElementById("chat-preview-thumb")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (state.pendingPhoto) openChatPhotoGallery(state.pendingPhoto);
+    openChatPreviewOnly();
   });
 
   document.querySelectorAll("[data-open-photo]").forEach((photoEl) => {
     photoEl.addEventListener("click", (e) => {
       e.stopPropagation();
-      openChatPhotoGallery(photoEl.dataset.openPhoto);
+      openSentChatPhotosGallery(photoEl.dataset.openPhoto);
     });
   });
 
