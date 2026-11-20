@@ -1,4 +1,12 @@
-import { state, nowTime, showToast, saveState, syncDailyMissReset } from "./state.js";
+import {
+  state,
+  nowTime,
+  showToast,
+  saveState,
+  syncDailyMissReset,
+  clearDeviceRole
+} from "./state.js";
+import { openPasscodeLockOverlay, renderApp } from "./app.js";
 
 let isEditingCouple = false;
 
@@ -173,6 +181,7 @@ export function renderBiz(contentEl) {
           <button type="button" class="tool-btn" id="toggle-couple-edit">${
             isEditingCouple ? "Kapat" : "Düzenle"
           }</button>
+          <button type="button" class="tool-btn" id="logout-role-btn">Çıkış</button>
         </div>
       </div>
 
@@ -253,6 +262,15 @@ export function renderBiz(contentEl) {
   document.getElementById("toggle-couple-edit").addEventListener("click", () => {
     isEditingCouple = !isEditingCouple;
     renderBiz(contentEl);
+  });
+
+  document.getElementById("logout-role-btn").addEventListener("click", () => {
+    isEditingCouple = false;
+    clearDeviceRole();
+    renderApp();
+    openPasscodeLockOverlay(() => {
+      renderApp();
+    });
   });
 
   if (isEditingCouple) {
