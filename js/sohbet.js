@@ -4,7 +4,8 @@ import {
   saveState,
   getDeviceRole,
   setMyTypingStatus,
-  isPartnerTyping
+  isPartnerTyping,
+  requestMediaPermissionSafe
 } from "./state.js";
 
 const EMOJIS = [
@@ -168,11 +169,7 @@ function beginCallConversationTimer(contentEl) {
 function attachStreamToVideoEl() {
   const videoEl = document.getElementById("call-local-video");
   if (!videoEl) return;
-  if (callStream && !camOff && state.callMode === "video") {
-    videoEl.srcObject = callStream;
-  } else {
-    videoEl.srcObject = null;
-  }
+  videoEl.srcObject = callStream && !camOff && state.callMode === "video" ? callStream : null;
 }
 
 function blobToDataUrl(blob) {
@@ -197,20 +194,26 @@ function getMessagePreviewText(msg) {
   return "Mesaj";
 }
 
+function buildReplyPayload(replyMsg) {
+  if (!replyMsg) return null;
+  return {
+    id: replyMsg.id,
+    author: getSenderLabel(replyMsg.sender),
+    text: getMessagePreviewText(replyMsg)
+  };
+}
+
 function scrollToAndHighlightMessage(msgId) {
   const bubble = document.querySelector(`[data-msg-bubble="${msgId}"]`);
   if (!bubble) return;
   bubble.scrollIntoView({ behavior: "smooth", block: "center" });
   bubble.classList.add("highlighted-flash");
-  setTimeout(() => {
-    bubble.classList.remove("highlighted-flash");
-  }, 1400);
+  setTimeout(() => bubble.classList.remove("highlighted-flash"), 1400);
 }
 
 function renderReceipt(msg) {
   if (msg.sender !== "me") return "";
 
-  // Okunduğunda / görüldüğünde WhatsApp tarzı mavi tik
   if (msg.status === "read") {
     return `
       <svg class="tick-svg read" style="color:#34b7f1;" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" title="Görüldü">
@@ -220,7 +223,6 @@ function renderReceipt(msg) {
     `;
   }
 
-  // İletildiğinde çift tik
   if (msg.status === "delivered") {
     return `
       <svg class="tick-svg delivered" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" title="İletildi">
@@ -230,7 +232,6 @@ function renderReceipt(msg) {
     `;
   }
 
-  // Gönderildiğinde tek tik
   return `
     <svg class="tick-svg sent" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" title="Gönderildi">
       <path d="M3 8.5L7.5 13L17 3.5" />
@@ -468,9 +469,7 @@ function renderPeerInfoModal(contentEl) {
   document.addEventListener("keydown", handlePeerModalEsc);
 
   modal.addEventListener("click", (e) => {
-    if (e.target === modal) {
-      closePeerInfoModal();
-    }
+    if (e.target === modal) closePeerInfoModal();
   });
 
   document.getElementById("close-peer-modal-btn").addEventListener("click", closePeerInfoModal);
@@ -617,8 +616,7 @@ export function renderSohbet(
   const isConnected = state.callMode && callPhase === "connected";
   const isIncomingCall = isRinging && callDirection === "incoming";
   const partnerLabel = state.partnerName || "Emine";
-  const partnerIsTypingNow = isPartnerTyping();
-  const subStatusText = partnerIsTypingNow
+  const subStatusText = isPartnerTyping()
     ? "yazıyor..."
     : `${state.partnerMood} · ${Number(state.distanceKm).toFixed(1)} km`;
   const callKindText = state.callMode === "video" ? "görüntülü" : "sesli";
@@ -806,9 +804,7 @@ export function renderSohbet(
     setMyTypingStatus(hasText);
     clearTimeout(typingStopTimeout);
     if (hasText) {
-      typingStopTimeout = setTimeout(() => {
-        setMyTypingStatus(false);
-      }, 1500);
+      typingStopTimeout = setTimeout(() => setMyTypingStatus(false), 1500);
     }
   });
 
@@ -827,8 +823,7 @@ export function renderSohbet(
   });
 
   const triggerReplyTo = (msgId) => {
-    const target = state.messages.find((m) => m.id === msgId);
-    if (!target) return;
+    if (!state.messages.some((m) => m.id === msgId)) return;
     replyingToMsgId = msgId;
     state.activeReactionMsgId = null;
     renderSohbet(contentEl, true, { scrollToBottom: false, preserveScroll: true });
@@ -902,9 +897,7 @@ export function renderSohbet(
     bubble.addEventListener("touchcancel", finishTouchSwipe);
 
     bubble.addEventListener("pointerdown", (e) => {
-      if (e.pointerType === "touch") return;
-      if (e.button === 2) return;
-      if (e.target.closest("[data-open-photo]")) return;
+      if (e.pointerType === "touch" || e.button === 2 || e.target.closest("[data-open-photo]")) return;
       longPressTriggered = false;
       clearTimeout(pressTimer);
       pressTimer = setTimeout(() => {
@@ -918,9 +911,7 @@ export function renderSohbet(
     bubble.addEventListener("pointercancel", () => clearTimeout(pressTimer));
 
     bubble.addEventListener("click", () => {
-      if (longPressTriggered) {
-        longPressTriggered = false;
-      }
+      if (longPressTriggered) longPressTriggered = false;
     });
   });
 
@@ -976,44 +967,35 @@ export function renderSohbet(
     document.getElementById("voice-call-btn")?.setAttribute("disabled", "true");
     document.getElementById("video-call-btn")?.setAttribute("disabled", "true");
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const mediaRes = await requestMediaPermissionSafe(mode);
+    if (!mediaRes.ok || !mediaRes.stream) {
       isStartingCall = false;
-      callErrorMsg = "Bu tarayıcıda ses/görüntü araması desteklenmiyor.";
+      stopCallMediaAndTimers();
+      state.callMode = null;
+      callErrorMsg =
+        mediaRes.reason === "unsupported"
+          ? "Bu tarayıcıda ses/görüntü araması desteklenmiyor."
+          : mode === "video"
+          ? "Kamera veya mikrofon izni verilmedi."
+          : "Mikrofon izni verilmedi.";
       appendCallLogMessage(mode, 0, "missed");
       renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
       return;
     }
 
-    try {
-      const constraints =
-        mode === "video"
-          ? { audio: true, video: { facingMode: "user" } }
-          : { audio: true, video: false };
+    callStream = mediaRes.stream;
+    state.callMode = mode;
+    state.callSeconds = 0;
+    callPhase = "ringing";
+    callDirection = "outgoing";
+    micMuted = false;
+    camOff = false;
 
-      callStream = await navigator.mediaDevices.getUserMedia(constraints);
-      state.callMode = mode;
-      state.callSeconds = 0;
-      callPhase = "ringing";
-      callDirection = "outgoing";
-      micMuted = false;
-      camOff = false;
-
-      const callLabel = mode === "video" ? "Görüntülü arama" : "Sesli arama";
-      addSystemCallNotice(`${callLabel} · Arıyor...`);
-      isStartingCall = false;
-      renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
-      startRingingCountdown(contentEl, mode);
-    } catch {
-      isStartingCall = false;
-      stopCallMediaAndTimers();
-      state.callMode = null;
-      callErrorMsg =
-        mode === "video"
-          ? "Kamera veya mikrofon izni verilmedi."
-          : "Mikrofon izni verilmedi.";
-      appendCallLogMessage(mode, 0, "missed");
-      renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
-    }
+    const callLabel = mode === "video" ? "Görüntülü arama" : "Sesli arama";
+    addSystemCallNotice(`${callLabel} · Arıyor...`);
+    isStartingCall = false;
+    renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
+    startRingingCountdown(contentEl, mode);
   };
 
   document.getElementById("voice-call-btn")?.addEventListener("click", () => startOutgoingCall("voice"));
@@ -1034,33 +1016,27 @@ export function renderSohbet(
     const elapsed = state.callSeconds;
     stopCallMediaAndTimers();
     state.callMode = null;
-    if (wasConnected) {
-      appendCallLogMessage(mode, elapsed, "ended");
-    } else {
-      appendCallLogMessage(mode, 0, "missed");
-    }
+    appendCallLogMessage(mode, wasConnected ? elapsed : 0, wasConnected ? "ended" : "missed");
     renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
   });
 
-  document.getElementById("toggle-mic-btn")?.addEventListener("click", () => {
-    micMuted = !micMuted;
-    if (callStream) {
-      callStream.getAudioTracks().forEach((t) => {
+  const toggleCallTrack = (kind) => {
+    if (kind === "mic") {
+      micMuted = !micMuted;
+      callStream?.getAudioTracks().forEach((t) => {
         t.enabled = !micMuted;
       });
-    }
-    renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
-  });
-
-  document.getElementById("toggle-cam-btn")?.addEventListener("click", () => {
-    camOff = !camOff;
-    if (callStream) {
-      callStream.getVideoTracks().forEach((t) => {
+    } else {
+      camOff = !camOff;
+      callStream?.getVideoTracks().forEach((t) => {
         t.enabled = !camOff;
       });
     }
     renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
-  });
+  };
+
+  document.getElementById("toggle-mic-btn")?.addEventListener("click", () => toggleCallTrack("mic"));
+  document.getElementById("toggle-cam-btn")?.addEventListener("click", () => toggleCallTrack("cam"));
 
   document.getElementById("photo-input")?.addEventListener("change", (e) => {
     const file = e.target.files?.[0];
@@ -1087,63 +1063,53 @@ export function renderSohbet(
       return;
     }
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      if (recordStatus) recordStatus.textContent = "Mikrofon desteklenmiyor.";
+    const mediaRes = await requestMediaPermissionSafe("voice");
+    if (!mediaRes.ok || !mediaRes.stream) {
+      if (recordStatus) {
+        recordStatus.textContent =
+          mediaRes.reason === "unsupported" ? "Mikrofon desteklenmiyor." : "Mikrofon izni verilmedi.";
+      }
       return;
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+    const stream = mediaRes.stream;
+    const recorder = new MediaRecorder(stream);
+    state.audioChunks = [];
+    state.mediaRecorder = recorder;
+
+    recorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) state.audioChunks.push(ev.data);
+    };
+
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(state.audioChunks, { type: recorder.mimeType || "audio/webm" });
       state.audioChunks = [];
-      state.mediaRecorder = recorder;
+      state.mediaRecorder = null;
 
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) {
-          state.audioChunks.push(ev.data);
-        }
-      };
+      if (blob.size > 0) {
+        const audioDataUrl = await blobToDataUrl(blob);
+        state.messages.push({
+          id: Date.now() + Math.floor(Math.random() * 100),
+          sender: "me",
+          authorRole: getDeviceRole() || "userA",
+          type: "audio",
+          src: audioDataUrl,
+          time: nowTime(),
+          status: "sent",
+          reaction: null,
+          replyTo: buildReplyPayload(activeReplyMsg)
+        });
+        replyingToMsgId = null;
+        setMyTypingStatus(false);
+        saveState({ pushCloud: true });
+        renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
+      }
+    };
 
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(state.audioChunks, { type: recorder.mimeType || "audio/webm" });
-        state.audioChunks = [];
-        state.mediaRecorder = null;
-
-        if (blob.size > 0) {
-          const audioDataUrl = await blobToDataUrl(blob);
-          const replyPayload = activeReplyMsg
-            ? {
-                id: activeReplyMsg.id,
-                author: getSenderLabel(activeReplyMsg.sender),
-                text: getMessagePreviewText(activeReplyMsg)
-              }
-            : null;
-
-          state.messages.push({
-            id: Date.now() + Math.floor(Math.random() * 100),
-            sender: "me",
-            authorRole: getDeviceRole() || "userA",
-            type: "audio",
-            src: audioDataUrl,
-            time: nowTime(),
-            status: "sent",
-            reaction: null,
-            replyTo: replyPayload
-          });
-          replyingToMsgId = null;
-          setMyTypingStatus(false);
-          saveState({ pushCloud: true });
-          renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
-        }
-      };
-
-      recorder.start();
-      if (recordStatus) recordStatus.textContent = "Kaydediliyor... (Bitirmek için tekrar bas)";
-      recordBtn.textContent = "Kaydı Durdur";
-    } catch {
-      if (recordStatus) recordStatus.textContent = "Mikrofon izni verilmedi.";
-    }
+    recorder.start();
+    if (recordStatus) recordStatus.textContent = "Kaydediliyor... (Bitirmek için tekrar bas)";
+    recordBtn.textContent = "Kaydı Durdur";
   });
 
   const sendCurrentMessage = () => {
@@ -1152,14 +1118,6 @@ export function renderSohbet(
     const hasPhoto = Boolean(state.pendingPhoto);
 
     if (!text && !hasPhoto) return;
-
-    const replyPayload = activeReplyMsg
-      ? {
-          id: activeReplyMsg.id,
-          author: getSenderLabel(activeReplyMsg.sender),
-          text: getMessagePreviewText(activeReplyMsg)
-        }
-      : null;
 
     const newMsg = {
       id: Date.now() + Math.floor(Math.random() * 100),
@@ -1171,7 +1129,7 @@ export function renderSohbet(
       time: nowTime(),
       status: "sent",
       reaction: null,
-      replyTo: replyPayload
+      replyTo: buildReplyPayload(activeReplyMsg)
     };
 
     clearTimeout(typingStopTimeout);
