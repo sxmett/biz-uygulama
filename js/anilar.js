@@ -1,4 +1,4 @@
-import { state, showToast, saveState } from "./state.js";
+import { state, showToast, saveState, openGalleryLightbox } from "./state.js";
 
 function getTodayDateInputValue() {
   const now = new Date();
@@ -33,32 +33,31 @@ function formatTurkishDateFromInput(dateStr) {
   return dateStr;
 }
 
-function openMemoryLightbox(src) {
-  if (!src) return;
-  document.getElementById("memory-lightbox-overlay")?.remove();
+// Anı önizlemesi kendi başına ayrı açılır (kayıtlı anılarla karışmaz)
+function openMemoryPreviewOnly() {
+  if (!state.pendingMemoryPhoto) return;
+  openGalleryLightbox(
+    [{ src: state.pendingMemoryPhoto, title: "Yeni anı fotoğraf önizlemesi" }],
+    0
+  );
+}
 
-  const overlay = document.createElement("div");
-  overlay.id = "memory-lightbox-overlay";
-  overlay.className = "photo-lightbox";
-  overlay.innerHTML = `
-    <div class="lightbox-bar">
-      <span class="status-pill">Anı Fotoğrafı</span>
-      <div class="lightbox-controls">
-        <button type="button" class="lightbox-btn" id="close-memory-lightbox">Kapat</button>
-      </div>
-    </div>
-    <div class="lightbox-stage" id="memory-lightbox-stage">
-      <img src="${src}" alt="Anı fotoğrafı" class="lightbox-img" />
-    </div>
-  `;
+// Kayıtlı anı fotoğrafları kendi arasında ayrı açılır (önizlemeyle karışmaz)
+function openSavedMemoriesGallery(clickedSrc) {
+  const savedPhotos = (state.memories || [])
+    .filter((m) => m && m.photo)
+    .map((m) => ({
+      src: m.photo,
+      title: `${m.title || "Anı"} · ${m.date || ""}`
+    }));
 
-  document.body.appendChild(overlay);
+  if (savedPhotos.length === 0) return;
 
-  const close = () => overlay.remove();
-  document.getElementById("close-memory-lightbox")?.addEventListener("click", close);
-  document.getElementById("memory-lightbox-stage")?.addEventListener("click", (e) => {
-    if (e.target === e.currentTarget) close();
-  });
+  const idx = Math.max(
+    0,
+    savedPhotos.findIndex((item) => item.src === clickedSrc)
+  );
+  openGalleryLightbox(savedPhotos, idx);
 }
 
 export function renderAnilar(contentEl) {
@@ -68,7 +67,13 @@ export function renderAnilar(contentEl) {
     ? `
       <div class="anilar-preview-box">
         <div class="anilar-preview-left">
-          <img src="${state.pendingMemoryPhoto}" alt="Anı önizleme" class="anilar-preview-thumb" />
+          <img
+            src="${state.pendingMemoryPhoto}"
+            alt="Anı önizleme"
+            id="anilar-preview-thumb"
+            class="anilar-preview-thumb"
+            style="cursor:pointer;"
+          />
           <span class="anilar-preview-text">Fotoğraf anıya eklenecek</span>
         </div>
         <button type="button" class="anilar-ghost-btn" id="clear-memory-photo-btn">Kaldır</button>
@@ -82,7 +87,7 @@ export function renderAnilar(contentEl) {
           .map((item) => {
             const isConfirming = state.confirmDeleteId === item.id;
             const photoHtml = item.photo
-              ? `<img src="${item.photo}" alt="${item.title}" class="anilar-card-photo" data-open-memory-photo="${item.photo}" />`
+              ? `<img src="${item.photo}" alt="${item.title}" class="anilar-card-photo" style="cursor:pointer;" data-open-memory-photo="${item.photo}" />`
               : "";
 
             const actionHtml = isConfirming
@@ -222,10 +227,15 @@ export function renderAnilar(contentEl) {
     showToast("memory-feedback", "Yeni anı kaydedildi.");
   });
 
+  document.getElementById("anilar-preview-thumb")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openMemoryPreviewOnly();
+  });
+
   document.querySelectorAll("[data-open-memory-photo]").forEach((imgEl) => {
     imgEl.addEventListener("click", (e) => {
       e.stopPropagation();
-      openMemoryLightbox(imgEl.dataset.openMemoryPhoto);
+      openSavedMemoriesGallery(imgEl.dataset.openMemoryPhoto);
     });
   });
 
