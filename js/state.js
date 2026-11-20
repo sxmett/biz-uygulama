@@ -514,3 +514,45 @@ export function showToast(containerId, message) {
   if (!el) return;
   el.innerHTML = `<div class="toast">${message}</div>`;
 }
+
+export async function requestNotificationPermissionSafe() {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+  } catch {
+    // Sessiz geç
+  }
+}
+
+export async function requestLocationPermissionSafe() {
+  if (!navigator.geolocation || !navigator.geolocation.getCurrentPosition) {
+    return { ok: false, reason: "unsupported" };
+  }
+
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ ok: true, position: pos }),
+      (err) => resolve({ ok: false, reason: err?.code === 1 ? "denied" : "error", error: err }),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+}
+
+export async function requestMediaPermissionSafe(mode = "voice") {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return { ok: false, stream: null, reason: "unsupported" };
+  }
+
+  const constraints =
+    mode === "video"
+      ? { audio: true, video: { facingMode: "user" } }
+      : { audio: true, video: false };
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    return { ok: true, stream, reason: "granted" };
+  } catch (err) {
+    return { ok: false, stream: null, reason: err?.name || "denied", error: err };
+  }
+}
