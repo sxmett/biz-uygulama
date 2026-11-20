@@ -2,14 +2,18 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding-bottom: 18px;
 }
 
 .radar-hero-card {
-  background: linear-gradient(155deg, #fff5f8 0%, #ffffff 55%, #f6f3ff 100%);
-  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 110, 155, 0.16), transparent 48%),
+    radial-gradient(circle at bottom left, rgba(124, 92, 255, 0.15), transparent 52%),
+    #ffffff;
+  border-radius: 26px;
   padding: 18px 16px;
-  box-shadow: 0 12px 30px rgba(214, 28, 78, 0.09);
-  border: 1px solid rgba(230, 46, 101, 0.16);
+  box-shadow: 0 14px 32px rgba(36, 22, 48, 0.08);
+  border: 1px solid rgba(230, 46, 101, 0.14);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -27,9 +31,9 @@
   color: #ffffff;
   font-weight: 700;
   font-size: 12.5px;
-  padding: 6px 13px;
+  padding: 6px 14px;
   border-radius: 999px;
-  box-shadow: 0 4px 12px rgba(214, 28, 78, 0.22);
+  box-shadow: 0 6px 14px rgba(214, 28, 78, 0.24);
 }
 
 .radar-bridge {
@@ -37,7 +41,7 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 10px;
-  padding: 8px 4px;
+  padding: 6px 2px;
 }
 
 .radar-person {
@@ -49,18 +53,17 @@
 }
 
 .radar-avatar {
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 17px;
+  font-size: 18px;
   color: #ffffff;
   background: linear-gradient(135deg, #ff5c8a, #c8184b);
   box-shadow: 0 8px 18px rgba(200, 24, 75, 0.25);
-  border: 2.5px solid #ffffff;
 }
 
 .radar-avatar.partner {
@@ -71,12 +74,12 @@
 .radar-person-name {
   font-size: 12.5px;
   font-weight: 700;
-  color: #241f24;
+  color: #221d26;
 }
 
 .radar-person-place {
   font-size: 11px;
-  color: #746b73;
+  color: #746b78;
   max-width: 96px;
   white-space: nowrap;
   overflow: hidden;
@@ -89,75 +92,95 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .radar-track {
   position: relative;
   width: 100%;
-  height: 9px;
+  height: 10px;
   border-radius: 999px;
-  background: #ede4eb;
+  background: #f0eaf5;
   overflow: hidden;
 }
 
 .radar-track-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #ff4d79 0%, #c8184b 50%, #7c5cff 100%);
+  background: linear-gradient(90deg, #ff4d79 0%, #e62e65 50%, #7c5cff 100%);
   transition: width 0.35s ease;
 }
 
 .radar-distance-chip {
-  background: #1e1924;
+  background: #1d1824;
   color: #ffffff;
   font-size: 12px;
   font-weight: 700;
   padding: 5px 12px;
   border-radius: 999px;
-  box-shadow: 0 6px 14px rgba(30, 25, 36, 0.2);
+  box-shadow: 0 6px 14px rgba(29, 24, 36, 0.22);
   white-space: nowrap;
 }
 
 .radar-sub-status {
   font-size: 12px;
-  color: #675e66;
+  color: #5f5666;
   text-align: center;
-  background: rgba(255, 255, 255, 0.75);
-  padding: 8px 12px;
-  border-radius: 12px;
+  background: #faf7fc;
+  border: 1px solid rgba(28, 25, 29, 0.05);
+  padding: 9px 12px;
+  border-radius: 14px;
 }
 
 .loc-person-card {
-  border-radius: 20px;
+  border-radius: 22px;
+  background: #ffffff;
   border: 1px solid rgba(28, 25, 29, 0.07);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.04);
 }
 
 .loc-person-card.mine {
-  border-left: 4px solid #e62e65;
+  border-top: 4px solid #e62e65;
 }
 
 .loc-person-card.partner {
-  border-left: 4px solid #6b4eff;
+  border-top: 4px solid #6b4eff;
 }
 
 .loc-coords-pill {
   display: inline-block;
   margin-top: 4px;
   font-size: 11.5px;
-  color: #6f676e;
-  background: #f8f5f7;
-  padding: 4px 10px;
+  color: #5b5360;
+  background: #f6f3f8;
+  padding: 5px 11px;
   border-radius: 999px;
 }
 
-.loc-error-box {
+.loc-manual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   margin-top: 8px;
+}
+
+.loc-error-box {
+  margin-top: 10px;
   font-size: 12px;
-  color: #c8184b;
+  color: #b81443;
   background: #fff0f4;
-  padding: 8px 10px;
-  border-radius: 12px;
-  line-height: 1.4;
+  border: 1px solid rgba(214, 28, 78, 0.18);
+  padding: 10px 12px;
+  border-radius: 14px;
+  line-height: 1.45;
+}
+
+.loc-success-box {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #166534;
+  background: #f0fdf4;
+  border: 1px solid rgba(22, 101, 52, 0.2);
+  padding: 9px 12px;
+  border-radius: 14px;
 }
