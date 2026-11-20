@@ -1,5 +1,38 @@
 import { state, showToast, saveState } from "./state.js";
 
+function getTodayDateInputValue() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function formatTurkishDateFromInput(dateStr) {
+  if (!dateStr) {
+    return new Date().toLocaleDateString("tr-TR", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+  }
+  const parts = String(dateStr).split("-");
+  if (parts.length === 3) {
+    const year = Number(parts[0]);
+    const month = Number(parts[1]) - 1;
+    const day = Number(parts[2]);
+    const dt = new Date(year, month, day);
+    if (!Number.isNaN(dt.getTime())) {
+      return dt.toLocaleDateString("tr-TR", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      });
+    }
+  }
+  return dateStr;
+}
+
 function openMemoryLightbox(src) {
   if (!src) return;
   document.getElementById("memory-lightbox-overlay")?.remove();
@@ -29,14 +62,16 @@ function openMemoryLightbox(src) {
 }
 
 export function renderAnilar(contentEl) {
+  const defaultDateVal = getTodayDateInputValue();
+
   const photoPreviewHtml = state.pendingMemoryPhoto
     ? `
-      <div class="preview-box">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <img src="${state.pendingMemoryPhoto}" alt="Anı önizleme" class="preview-thumb" />
-          <span class="muted-note">Fotoğraf anıya eklenecek</span>
+      <div class="anilar-preview-box">
+        <div class="anilar-preview-left">
+          <img src="${state.pendingMemoryPhoto}" alt="Anı önizleme" class="anilar-preview-thumb" />
+          <span class="anilar-preview-text">Fotoğraf anıya eklenecek</span>
         </div>
-        <button type="button" class="tool-btn" id="clear-memory-photo-btn">Kaldır</button>
+        <button type="button" class="anilar-ghost-btn" id="clear-memory-photo-btn">Kaldır</button>
       </div>
     `
     : "";
@@ -47,66 +82,96 @@ export function renderAnilar(contentEl) {
           .map((item) => {
             const isConfirming = state.confirmDeleteId === item.id;
             const photoHtml = item.photo
-              ? `<img src="${item.photo}" alt="${item.title}" class="memory-photo" data-open-memory-photo="${item.photo}" />`
+              ? `<img src="${item.photo}" alt="${item.title}" class="anilar-card-photo" data-open-memory-photo="${item.photo}" />`
               : "";
 
             const actionHtml = isConfirming
               ? `
-                <div class="confirm-row">
-                  <span class="confirm-text">Bu anıyı silmek istediğine emin misin?</span>
-                  <button type="button" class="tool-btn" data-cancel-delete="${item.id}">İptal</button>
-                  <button type="button" class="danger-btn" data-confirm-delete="${item.id}">Evet, Sil</button>
+                <div class="anilar-confirm-box">
+                  <span class="anilar-confirm-text">Bu anıyı silmek istediğine emin misin?</span>
+                  <div class="anilar-confirm-actions">
+                    <button type="button" class="anilar-ghost-btn" data-cancel-delete="${item.id}">İptal</button>
+                    <button type="button" class="anilar-danger-btn" data-confirm-delete="${item.id}">Evet, Sil</button>
+                  </div>
                 </div>
               `
-              : `<button type="button" class="delete-memory-btn" data-ask-delete="${item.id}">Sil</button>`;
+              : `<button type="button" class="anilar-delete-btn" data-ask-delete="${item.id}">Sil</button>`;
 
             return `
-              <div class="memory-card" data-memory-id="${item.id}">
-                <div class="memory-top">
-                  <strong>${item.title}</strong>
-                  <span class="memory-date">${item.date}</span>
+              <article class="anilar-item-card" data-memory-id="${item.id}">
+                <div class="anilar-item-header">
+                  <strong class="anilar-item-title">${item.title}</strong>
+                  <span class="anilar-item-date">${item.date}</span>
                 </div>
                 ${photoHtml}
-                <p class="memory-note">${item.note}</p>
-                <div class="memory-footer">
-                  <span class="memory-author">Ekleyen: ${item.author || state.myName || "Sen"}</span>
+                <p class="anilar-item-note">${item.note}</p>
+                <div class="anilar-item-footer">
+                  <span class="anilar-item-author">Ekleyen: ${item.author || state.myName || "Sen"}</span>
                   ${actionHtml}
                 </div>
-              </div>
+              </article>
             `;
           })
           .join("")
       : `
-        <div class="card" style="text-align:center;">
-          <div class="label" style="margin-bottom:6px;">Anı Defteri Boş</div>
-          <strong>Henüz anı eklenmemiş</strong>
-          <p class="muted-note" style="margin-top:6px;">İlk özel anını yukarıdaki alandan ekleyerek burada saklayabilirsin.</p>
+        <div class="anilar-empty-card">
+          <span class="anilar-empty-badge">Anı Defteri</span>
+          <h3 class="anilar-empty-title">Henüz anı eklenmemiş</h3>
+          <p class="anilar-empty-desc">İlk özel anını yukarıdaki alandan ekleyerek burada güzel bir koleksiyon oluşturabilirsin.</p>
         </div>
       `;
 
   contentEl.innerHTML = `
-    <div class="memories-layout">
-      <div class="card">
-        <div class="label">Yeni Anı Ekle</div>
-        <div class="memory-form">
-          <input type="text" id="mem-title" class="msg-input plain-input" placeholder="Anı başlığı (Örn: İlk buluşma)" />
-          <input type="text" id="mem-date" class="msg-input plain-input" placeholder="Tarih (Örn: 15 Haziran)" />
-          <textarea id="mem-note" class="msg-input plain-input memory-textarea" placeholder="Bu anı hakkında kısa bir not yaz..."></textarea>
+    <div class="anilar-page">
+      <section class="anilar-form-card">
+        <div class="anilar-section-title">Yeni Anı Ekle</div>
 
-          <div class="memory-form-actions">
-            <label class="tool-btn" style="cursor:pointer;">
-              Fotoğraf Ekle
+        <div class="anilar-form-stack">
+          <div class="anilar-field">
+            <label for="mem-title" class="anilar-field-label">Anı Başlığı</label>
+            <input
+              type="text"
+              id="mem-title"
+              class="anilar-input"
+              placeholder="Örn: İlk kahve buluşması"
+            />
+          </div>
+
+          <div class="anilar-field">
+            <label for="mem-date" class="anilar-field-label">Tarih Seç</label>
+            <input
+              type="date"
+              id="mem-date"
+              class="anilar-input anilar-date-input"
+              value="${defaultDateVal}"
+            />
+          </div>
+
+          <div class="anilar-field">
+            <label for="mem-note" class="anilar-field-label">Notun</label>
+            <textarea
+              id="mem-note"
+              class="anilar-textarea"
+              placeholder="Bu anı hakkında kısa bir not yaz..."
+            ></textarea>
+          </div>
+
+          <div class="anilar-actions-row">
+            <label class="anilar-secondary-btn" style="cursor:pointer;">
+              Fotoğraf Seç
               <input type="file" id="mem-photo-input" accept="image/*" hidden />
             </label>
-            <button type="button" class="send-btn" id="add-memory-btn">Anıyı Kaydet</button>
+            <button type="button" class="anilar-primary-btn" id="add-memory-btn">Anıyı Kaydet</button>
           </div>
 
           ${photoPreviewHtml}
           <div id="memory-feedback"></div>
         </div>
-      </div>
+      </section>
 
-      ${memoriesHtml}
+      <section class="anilar-list-section">
+        ${memoriesHtml}
+      </section>
     </div>
   `;
 
@@ -132,22 +197,19 @@ export function renderAnilar(contentEl) {
     const noteEl = document.getElementById("mem-note");
 
     const title = (titleEl?.value || "").trim();
-    const date = (dateEl?.value || "").trim() || new Date().toLocaleDateString("tr-TR", {
-      day: "numeric",
-      month: "long"
-    });
+    const formattedDate = formatTurkishDateFromInput(dateEl?.value || "");
     const note = (noteEl?.value || "").trim();
 
     if (!title) {
       titleEl?.focus();
-      showToast("memory-feedback", "Lütfen anı başlığı gir.");
+      showToast("memory-feedback", "Lütfen bir anı başlığı gir.");
       return;
     }
 
     state.memories.unshift({
       id: Date.now() + Math.floor(Math.random() * 100),
       title,
-      date,
+      date: formattedDate,
       author: state.myName || "Sen",
       photo: state.pendingMemoryPhoto || null,
       note: note || "Özel bir an."
