@@ -113,58 +113,61 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js"
     );
 
-    const supported =
-      firebaseAppMod.app &&
-      typeof messagingMod.isSupported === "function" &&
-      (await messagingMod.isSupported());
-
     if (
-      supported &&
+      firebaseAppMod.app &&
       typeof Notification !== "undefined" &&
       Notification.permission === "granted" &&
       VAPID_PUBLIC_KEY &&
       !VAPID_PUBLIC_KEY.startsWith("BURAYA_")
     ) {
-      const messaging = messagingMod.getMessaging(firebaseAppMod.app);
-      const token = await messagingMod.getToken(messaging, {
-        vapidKey: VAPID_PUBLIC_KEY,
-        serviceWorkerRegistration: swRegistration || undefined
-      });
-
-      const myRole = getDeviceRole() || "userA";
-      if (token) {
-        await set(ref(db, `biz_room/push_tokens/${myRole}`), {
-          token,
-          updatedAt: Date.now()
-        });
+      let messaging = null;
+      try {
+        messaging = messagingMod.getMessaging(firebaseAppMod.app);
+      } catch {
+        messaging = null;
       }
 
-      messagingMod.onMessage(messaging, (payload) => {
-        const data = payload?.data || {};
-        const kind = data.kind || "message";
-        const title = payload?.notification?.title || data.title || "Yeni Bildirim";
-        const body = payload?.notification?.body || data.body || "";
+      if (messaging) {
+        const token = await messagingMod.getToken(messaging, {
+          vapidKey: VAPID_PUBLIC_KEY,
+          serviceWorkerRegistration: swRegistration || undefined
+        });
 
-        if (document.visibilityState === "visible") {
-          showInAppAlertBanner({
-            kind,
-            title,
-            body,
-            onOpen: () => onIncomingAlert?.(kind, data)
-          });
-        } else if (swRegistration?.showNotification) {
-          swRegistration.showNotification(title, {
-            body,
-            tag: kind.includes("call") ? "biz-incoming-call" : `biz-fg-${Date.now()}`,
-            renotify: true,
-            requireInteraction: kind.includes("call"),
-            data: { url: "/" }
+        const myRole = getDeviceRole() || "userA";
+        if (token) {
+          await set(ref(db, `biz_room/push_tokens/${myRole}`), {
+            token,
+            updatedAt: Date.now()
           });
         }
-      });
+
+        messagingMod.onMessage(messaging, (payload) => {
+          const data = payload?.data || {};
+          const kind = data.kind || "message";
+          const title = payload?.notification?.title || data.title || "Yeni Bildirim";
+          const body = payload?.notification?.body || data.body || "";
+
+          if (document.visibilityState === "visible") {
+            showInAppAlertBanner({
+              kind,
+              title,
+              body,
+              onOpen: () => onIncomingAlert?.(kind, data)
+            });
+          } else if (swRegistration?.showNotification) {
+            swRegistration.showNotification(title, {
+              body,
+              tag: kind.includes("call") ? "biz-incoming-call" : `biz-fg-${Date.now()}`,
+              renotify: true,
+              requireInteraction: kind.includes("call"),
+              data: { url: "/" }
+            });
+          }
+        });
+      }
     }
-  } catch (err) {
-    console.warn("FCM bu ortamda desteklenmiyor veya atlandı:", err);
+  } catch {
+    // Bu ortamda FCM desteklenmiyorsa sessizce geç
   }
 
   const myRole = getDeviceRole() || "userA";
