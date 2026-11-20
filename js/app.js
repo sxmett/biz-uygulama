@@ -4,14 +4,14 @@ import {
   initRealtimeSync,
   getDeviceRole,
   setDeviceRole,
-  resolveRoleFromPasscode,
-  requestNotificationPermissionSafe
+  resolveRoleFromPasscode
 } from "./state.js";
 import { renderBiz, clearBizClock } from "./biz.js";
 import { renderSohbet, markIncomingMessagesAsRead } from "./sohbet.js";
 import { renderKonum } from "./konum.js";
 import { renderAnilar } from "./anilar.js";
 import { renderAdmin } from "./admin.js";
+import { setupPushNotifications } from "./notifications.js";
 
 export function openPasscodeLockOverlay(onUnlocked) {
   document.getElementById("passcode-lock-overlay")?.remove();
@@ -274,7 +274,13 @@ export function renderApp() {
 
 function startAppAfterRoleReady() {
   renderApp();
-  requestNotificationPermissionSafe();
+
+  setupPushNotifications({
+    onIncomingAlert: () => {
+      state.activeTab = "sohbet";
+      renderApp();
+    }
+  });
 
   initRealtimeSync(() => {
     if (!getDeviceRole()) return;
