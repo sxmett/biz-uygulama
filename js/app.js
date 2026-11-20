@@ -168,6 +168,8 @@ export function renderApp() {
 function startAppAfterRoleReady() {
   renderApp();
 
+  requestNotificationPermissionSafe();
+
   initRealtimeSync(() => {
     if (state.activeTab === "sohbet") {
       markIncomingMessagesAsRead();
