@@ -5,7 +5,8 @@ import {
   calculateDistanceKm,
   getMapsUrl,
   showToast,
-  requestLocationPermissionSafe
+  requestLocationPermissionSafe,
+  writeMyProfileChanges
 } from "./state.js";
 
 function hasValidCoords(loc) {
@@ -26,6 +27,8 @@ function refreshDistanceIfPossible() {
       state.partnerLocation.lat,
       state.partnerLocation.lon
     );
+  } else {
+    state.distanceKm = 0;
   }
 }
 
@@ -67,11 +70,11 @@ export function renderKonum(contentEl) {
   refreshDistanceIfPossible();
 
   const prevManualInput = document.getElementById("manual-loc-input")?.value;
-  const myLabelText = state.myLocation?.label || "Henüz yazılmadı";
+  const myLabelText = state.myLocation?.label || "Henüz paylaşılmadı";
   const myUpdatedText = state.myLocation?.updatedAt || "Henüz güncellenmedi";
 
-  const partnerLabelText = state.partnerLocation?.label || "Konum paylaşılmadı";
-  const partnerUpdatedText = state.partnerLocation?.updatedAt || "Az önce";
+  const partnerLabelText = state.partnerLocation?.label || "Henüz paylaşılmadı";
+  const partnerUpdatedText = state.partnerLocation?.updatedAt || "Henüz güncellenmedi";
 
   contentEl.innerHTML = `
     <div class="loc-layout">
@@ -82,7 +85,7 @@ export function renderKonum(contentEl) {
         </div>
         <p class="muted-note">
           ${state.myName || "Sen"}: <strong>${myLabelText}</strong> · ${
-    state.partnerName || "Sevgilim"
+    state.partnerName || "Partner"
   }: <strong>${partnerLabelText}</strong>
         </p>
         <div id="loc-feedback" style="margin-top:10px;"></div>
@@ -101,7 +104,7 @@ export function renderKonum(contentEl) {
             type="text"
             id="manual-loc-input"
             class="msg-input plain-input loc-edit-input"
-            placeholder="Yer adı yaz (Örn: Ev, Kampüs, Kızılay)"
+            placeholder="Yer adı yaz (Örn: Ev, Kampüs)"
           />
           <button type="button" class="tool-btn" id="save-manual-loc-btn">Kaydet</button>
         </div>
@@ -114,7 +117,7 @@ export function renderKonum(contentEl) {
 
       <div class="card">
         <div class="loc-card-top">
-          <div class="label" style="margin:0;">${state.partnerName || "Sevgilim"} Konumu</div>
+          <div class="label" style="margin:0;">${state.partnerName || "Partner"} Konumu</div>
           <span class="status-pill">Güncel: ${partnerUpdatedText}</span>
         </div>
 
@@ -140,11 +143,13 @@ export function renderKonum(contentEl) {
       return;
     }
 
-    state.myLocation = {
-      ...(state.myLocation || {}),
-      label: val,
-      updatedAt: nowTime()
-    };
+    writeMyProfileChanges({
+      location: {
+        ...(state.myLocation || {}),
+        label: val,
+        updatedAt: nowTime()
+      }
+    });
     refreshDistanceIfPossible();
     saveState({ pushCloud: true });
     renderKonum(contentEl);
@@ -167,24 +172,25 @@ export function renderKonum(contentEl) {
       showToast(
         "loc-feedback",
         permRes.reason === "unsupported"
-          ? "Bu tarayıcı veya cihaz konum özelliğini desteklemiyor."
-          : "Konum izni verilmedi veya konum alınamadı. Telefon Ayarları > Uygulamalar > Biz > İzinler > Konum kısmından kontrol edebilirsin."
+          ? "Bu cihazda konum özelliği desteklenmiyor."
+          : "Konum izni verilmedi. Telefon Ayarları > Uygulamalar > Biz > İzinler > Konum kısmından açabilirsin."
       );
       return;
     }
 
     gpsBtn.textContent = "Konum Alınıyor...";
-
     const lat = Number(permRes.position.coords.latitude);
     const lon = Number(permRes.position.coords.longitude);
     const placeName = await resolveShortPlaceName(lat, lon);
 
-    state.myLocation = {
-      lat,
-      lon,
-      label: placeName,
-      updatedAt: nowTime()
-    };
+    writeMyProfileChanges({
+      location: {
+        lat,
+        lon,
+        label: placeName,
+        updatedAt: nowTime()
+      }
+    });
     refreshDistanceIfPossible();
     saveState({ pushCloud: true });
     renderKonum(contentEl);
