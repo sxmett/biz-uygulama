@@ -157,37 +157,37 @@ export function renderKonum(contentEl) {
   });
 
   const gpsBtn = document.getElementById("get-gps-btn");
-  gpsBtn.addEventListener("click", () => {
-    if (!navigator.geolocation) {
-      showToast("loc-feedback", "Bu tarayıcı konum özelliğini desteklemiyor.");
+  gpsBtn.addEventListener("click", async () => {
+    gpsBtn.disabled = true;
+    gpsBtn.textContent = "Konum İzni İsteniyor...";
+
+    const permRes = await requestLocationPermissionSafe();
+    if (!permRes.ok || !permRes.position) {
+      renderKonum(contentEl);
+      showToast(
+        "loc-feedback",
+        permRes.reason === "unsupported"
+          ? "Bu tarayıcı veya cihaz konum özelliğini desteklemiyor."
+          : "Konum izni verilmedi veya konum alınamadı. Telefon Ayarları > Uygulamalar > Biz > İzinler > Konum kısmından kontrol edebilirsin."
+      );
       return;
     }
 
-    gpsBtn.disabled = true;
     gpsBtn.textContent = "Konum Alınıyor...";
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = Number(pos.coords.latitude);
-        const lon = Number(pos.coords.longitude);
-        const placeName = await resolveShortPlaceName(lat, lon);
+    const lat = Number(permRes.position.coords.latitude);
+    const lon = Number(permRes.position.coords.longitude);
+    const placeName = await resolveShortPlaceName(lat, lon);
 
-        state.myLocation = {
-          lat,
-          lon,
-          label: placeName,
-          updatedAt: nowTime()
-        };
-        refreshDistanceIfPossible();
-        saveState({ pushCloud: true });
-        renderKonum(contentEl);
-        showToast("loc-feedback", `Konum güncellendi: ${placeName}`);
-      },
-      () => {
-        renderKonum(contentEl);
-        showToast("loc-feedback", "Konum izni verilmedi veya konum alınamadı.");
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
+    state.myLocation = {
+      lat,
+      lon,
+      label: placeName,
+      updatedAt: nowTime()
+    };
+    refreshDistanceIfPossible();
+    saveState({ pushCloud: true });
+    renderKonum(contentEl);
+    showToast("loc-feedback", `Konum güncellendi: ${placeName}`);
   });
 }
