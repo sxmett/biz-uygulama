@@ -1,195 +1,290 @@
-.form-stack {
+.anilar-page,
+.anilar-page * {
+  box-sizing: border-box;
+}
+
+.anilar-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 6px;
+  gap: 16px;
+  padding-bottom: 12px;
 }
 
-.mem-textarea {
-  min-height: 86px;
-  resize: vertical;
-  padding-right: 14px;
-  line-height: 1.45;
+.anilar-form-card,
+.anilar-item-card,
+.anilar-empty-card {
+  background: #ffffff;
+  border: 1px solid #ece6ea;
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(28, 25, 29, 0.05);
 }
 
-.mem-form-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
+.anilar-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8b7f88;
+  margin-bottom: 14px;
 }
 
-.memory-card {
+.anilar-form-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 20px;
-  transition: transform 0.14s ease, box-shadow 0.14s ease;
+  gap: 14px;
 }
 
-.memory-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(225, 29, 72, 0.05);
-}
-
-.memory-photo {
-  width: 100%;
-  max-height: 300px;
-  object-fit: cover;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  display: block;
-  cursor: zoom-in;
-}
-
-.memory-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.memory-title {
-  font-size: 1.12rem;
-  font-weight: 800;
-  color: var(--text);
-  letter-spacing: -0.01em;
-}
-
-.memory-note {
-  font-size: 0.95rem;
-  color: var(--muted);
-  line-height: 1.55;
-  white-space: pre-line;
-}
-
-.memory-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.memory-author {
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.empty-memories-card {
-  text-align: center;
-  padding: 28px 20px;
+.anilar-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.delete-btn {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--muted);
-  padding: 7px 12px;
-  border-radius: 11px;
-  font-size: 0.8rem;
+.anilar-field-label {
+  font-size: 12.5px;
   font-weight: 600;
-  cursor: pointer;
-  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+  color: #4a4248;
 }
 
-.delete-btn:hover {
-  color: var(--accent);
-  background: var(--surface-soft);
-  border-color: var(--accent-soft);
-}
-
-.confirm-box {
-  background: var(--surface-soft);
-  border: 1px solid var(--accent-soft);
+.anilar-input,
+.anilar-textarea {
+  width: 100%;
+  border: 1.5px solid #e6dee3;
   border-radius: 14px;
+  background: #fafafa;
+  color: #1c191d;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.anilar-input {
+  min-height: 46px;
+  padding: 11px 14px;
+}
+
+.anilar-date-input {
+  min-height: 46px;
+  padding: 10px 14px;
+  color: #1c191d;
+}
+
+.anilar-textarea {
+  min-height: 92px;
   padding: 12px 14px;
+  resize: none;
+  line-height: 1.5;
+}
+
+.anilar-input:focus,
+.anilar-textarea:focus {
+  border-color: #e62e65;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(230, 46, 101, 0.12);
+}
+
+.anilar-actions-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
-  flex-wrap: wrap;
-  font-size: 0.88rem;
+  padding-top: 2px;
+}
+
+.anilar-secondary-btn,
+.anilar-primary-btn,
+.anilar-ghost-btn,
+.anilar-delete-btn,
+.anilar-danger-btn {
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 13.5px;
   font-weight: 600;
-  color: var(--text);
-}
-
-.confirm-actions {
-  display: flex;
-  gap: 8px;
-}
-
-/* Anı fotoğrafları için tam ekran yakınlaştırma penceresi */
-.anilar-lightbox {
-  position: fixed;
-  inset: 0;
-  background: rgba(10, 10, 14, 0.92);
-  z-index: 999;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-}
-
-.anilar-lightbox-bar {
-  width: 100%;
-  max-width: 720px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  z-index: 2;
-}
-
-.anilar-lightbox-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.anilar-lightbox-btn {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-  padding: 8px 13px;
-  border-radius: 12px;
-  font-size: 0.86rem;
-  font-weight: 700;
+  line-height: 1.2;
   cursor: pointer;
+  transition: transform 0.14s ease, opacity 0.14s ease, background-color 0.14s ease;
 }
 
-.anilar-lightbox-btn:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.anilar-lightbox-stage {
-  flex: 1;
-  width: 100%;
-  overflow: auto;
-  display: flex;
+.anilar-secondary-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 16px 0;
+  min-height: 44px;
+  padding: 0 16px;
+  background: #f6f3f5;
+  color: #2b252a;
+  border: 1px solid #e3dae0;
+  white-space: nowrap;
 }
 
-.anilar-lightbox-img {
-  max-width: 100%;
-  max-height: 78vh;
-  border-radius: 12px;
-  transform-origin: center center;
-  transition: transform 0.14s ease;
-  cursor: zoom-in;
-  user-select: none;
+.anilar-primary-btn {
+  flex: 1;
+  min-height: 44px;
+  padding: 0 18px;
+  border: none;
+  background: linear-gradient(135deg, #ff4d7d, #e62e65);
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(230, 46, 101, 0.24);
+  white-space: nowrap;
 }
 
-.anilar-lightbox-img.zoomed {
-  cursor: zoom-out;
+.anilar-preview-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #faf7f9;
+  border: 1px solid #eadfe6;
+}
+
+.anilar-preview-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.anilar-preview-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.anilar-preview-text {
+  font-size: 12.5px;
+  color: #5b5258;
+}
+
+.anilar-list-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.anilar-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.anilar-item-title {
+  font-size: 16px;
+  color: #1c191d;
+  line-height: 1.35;
+}
+
+.anilar-item-date {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #a12c56;
+  background: #fdf1f5;
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+
+.anilar-card-photo {
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  border-radius: 16px;
+  margin: 4px 0 12px;
+  display: block;
+  cursor: pointer;
+}
+
+.anilar-item-note {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #3f383d;
+  white-space: pre-line;
+}
+
+.anilar-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f1ebef;
+}
+
+.anilar-item-author {
+  font-size: 12.5px;
+  color: #7d737a;
+}
+
+.anilar-ghost-btn,
+.anilar-delete-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  background: #f7f4f6;
+  color: #4a4248;
+  border: 1px solid #e5dce2;
+}
+
+.anilar-danger-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: none;
+  background: #d61c4e;
+  color: #ffffff;
+}
+
+.anilar-confirm-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.anilar-confirm-text {
+  font-size: 12px;
+  color: #b42348;
+  font-weight: 600;
+}
+
+.anilar-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.anilar-empty-card {
+  text-align: center;
+  padding: 28px 20px;
+}
+
+.anilar-empty-badge {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9e3259;
+  background: #fdf0f5;
+  padding: 5px 12px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+}
+
+.anilar-empty-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  color: #1c191d;
+}
+
+.anilar-empty-desc {
+  margin: 0 auto;
+  max-width: 280px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #736970;
 }
