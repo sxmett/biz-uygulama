@@ -113,17 +113,19 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
   try {
     if ("serviceWorker" in navigator) {
       swRegistration = await navigator.serviceWorker.register("/sw.js");
+      console.log("SW kaydı tamam:", swRegistration.scope);
     }
-  } catch {
-    // Service worker kayıt hatası sessiz geçilir
+  } catch (err) {
+    console.warn("SW kayıt hatası:", err);
   }
 
   try {
     if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      await Notification.requestPermission();
+      const perm = await Notification.requestPermission();
+      console.log("Bildirim izni sonucu:", perm);
     }
-  } catch {
-    // İzin penceresi engellenirse sessiz geçilir
+  } catch (err) {
+    console.warn("İzin isteme hatası:", err);
   }
 
   try {
@@ -131,6 +133,9 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
     const messagingMod = await import(
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js"
     );
+
+    console.log("Firebase app var mı?:", Boolean(firebaseAppMod.app));
+    console.log("Notification izni:", typeof Notification !== "undefined" ? Notification.permission : "yok");
 
     if (
       firebaseAppMod.app &&
@@ -145,12 +150,15 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
         serviceWorkerRegistration: swRegistration || undefined
       });
 
+      console.log("Alınan FCM token:", token);
+
       const myRole = getDeviceRole() || "userA";
       if (token) {
         await set(ref(db, `biz_room/push_tokens/${myRole}`), {
           token,
           updatedAt: Date.now()
-        }).catch(() => {});
+        });
+        console.log("Token veritabanına yazıldı:", myRole);
       }
 
       messagingMod.onMessage(messaging, (payload) => {
@@ -177,8 +185,8 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
         }
       });
     }
-  } catch {
-    // Messaging henüz yapılandırılmadıysa uygulama akışı etkilenmez
+  } catch (err) {
+    console.warn("FCM token/messaging hatası:", err);
   }
 
   const myRole = getDeviceRole() || "userA";
