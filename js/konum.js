@@ -4,7 +4,8 @@ import {
   saveState,
   calculateDistanceKm,
   getMapsUrl,
-  showToast
+  showToast,
+  requestLocationPermissionSafe
 } from "./state.js";
 
 function hasValidCoords(loc) {
