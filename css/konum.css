@@ -1,69 +1,75 @@
-.loc-layout {
+.konum-layout {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.loc-card-top {
+.map-card {
+  background: var(--card-bg, #ffffff);
+  border-radius: 20px;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(230, 46, 101, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.map-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 8px;
 }
 
-.loc-place {
-  font-size: 1.05rem;
-  font-weight: 800;
-  color: var(--text);
-  margin-bottom: 4px;
-}
-
-.loc-meta-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-
-.loc-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
-
-.loc-edit-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 10px;
-}
-
-.loc-edit-input {
-  flex: 1;
-  min-width: 0;
-}
-
-.map-link-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  text-decoration: none;
-  border: 1px solid var(--border);
-  background: var(--surface-soft);
-  color: var(--accent);
-  padding: 8px 13px;
-  border-radius: 12px;
-  font-size: 0.84rem;
+.map-distance-badge {
+  background: #fff0f5;
+  color: #d61c4e;
   font-weight: 700;
-  transition: background 0.14s ease, border-color 0.14s ease;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 999px;
 }
 
-.map-link-btn:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+.map-participants-line {
+  font-size: 13px;
+  color: #555;
+  line-height: 1.4;
+}
+
+.google-map-canvas {
+  width: 100%;
+  height: 290px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #f4f5f7;
+  touch-action: none;
+  position: relative;
+}
+
+.map-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.map-hint-text {
+  font-size: 12px;
+  color: #777;
+}
+
+.map-fallback-box {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 18px;
+  gap: 8px;
+  color: #444;
+  font-size: 13px;
 }
