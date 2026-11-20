@@ -8,6 +8,7 @@ import {
   requestMediaPermissionSafe,
   openGalleryLightbox
 } from "./state.js";
+import { dispatchNotificationEvent } from "./notifications.js";
 
 const EMOJIS = [
   "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "😉",
@@ -239,7 +240,6 @@ function renderReceipt(msg) {
   `;
 }
 
-// Sohbet önizlemesi kendi başına ayrı açılır (sohbet fotoğraflarıyla karışmaz)
 function openChatPreviewOnly() {
   if (!state.pendingPhoto) return;
   openGalleryLightbox(
@@ -248,7 +248,6 @@ function openChatPreviewOnly() {
   );
 }
 
-// Gönderilmiş sohbet fotoğrafları kendi arasında ayrı açılır (önizlemeyle karışmaz)
 function openSentChatPhotosGallery(clickedSrc) {
   const sentPhotos = state.messages
     .filter((m) => m.type === "image" && m.src)
@@ -949,7 +948,17 @@ export function renderSohbet(
     camOff = false;
 
     const callLabel = mode === "video" ? "Görüntülü arama" : "Sesli arama";
+    const senderName = state.myName || "Partner";
+    const callId = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
     addSystemCallNotice(`${callLabel} · Arıyor...`);
+    dispatchNotificationEvent({
+      kind: mode === "video" ? "video_call" : "voice_call",
+      title: callLabel,
+      body: `${senderName} seni ${mode === "video" ? "görüntülü" : "sesli"} arıyor...`,
+      callId
+    });
+
     isStartingCall = false;
     renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
     startRingingCountdown(contentEl, mode);
@@ -1046,6 +1055,7 @@ export function renderSohbet(
 
       if (blob.size > 0) {
         const audioDataUrl = await blobToDataUrl(blob);
+        const senderName = state.myName || "Partner";
         state.messages.push({
           id: Date.now() + Math.floor(Math.random() * 100),
           sender: "me",
@@ -1060,6 +1070,11 @@ export function renderSohbet(
         replyingToMsgId = null;
         setMyTypingStatus(false);
         saveState({ pushCloud: true });
+        dispatchNotificationEvent({
+          kind: "message",
+          title: `${senderName} ses kaydı gönderdi`,
+          body: "🎤 Yeni sesli mesaj"
+        });
         renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
       }
     };
@@ -1097,6 +1112,14 @@ export function renderSohbet(
     setMyTypingStatus(false);
 
     saveState({ pushCloud: true });
+
+    const senderName = state.myName || "Partner";
+    dispatchNotificationEvent({
+      kind: "message",
+      title: `${senderName} mesaj gönderdi`,
+      body: hasPhoto ? (text ? `📷 ${text}` : "📷 Fotoğraf gönderdi") : text
+    });
+
     renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
   };
 
