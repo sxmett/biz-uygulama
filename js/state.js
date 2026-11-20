@@ -19,7 +19,6 @@ export const defaultState = {
     title: "Yıldönümü",
     date: "2026-12-12T00:00:00"
   },
-  // Ortak isimler (rol seçimine göre otomatik Samet / Emine olarak eşlenir)
   myName: "Samet",
   partnerName: "Emine",
   myAvatar: null,
@@ -135,6 +134,23 @@ export function setDeviceRole(role) {
   state.messages = normalizeMessagesForRole(state.messages);
   saveState({ pushCloud: true });
   return safeRole;
+}
+
+export function resolveRoleFromPasscode(rawCode) {
+  const normalized = String(rawCode || "").trim().toUpperCase();
+  if (normalized === "SMT-1506") return "userA";
+  if (normalized === "EMOS-1506") return "userB";
+  return null;
+}
+
+export function clearDeviceRole() {
+  try {
+    localStorage.removeItem(DEVICE_ROLE_KEY);
+  } catch {
+    // Sessiz geç
+  }
+  applyRoleNamesToState();
+  state.messages = normalizeMessagesForRole(state.messages);
 }
 
 export function setAdminOwner(enabled) {
@@ -418,7 +434,6 @@ export function initRealtimeSync(onRemoteUpdate) {
     suppressNextCloudPush = true;
     applySharedSnapshot(val);
 
-    // Karşı tarafın gönderdiği mesajlar bu cihaza ulaştıysa 'delivered' yap
     let changed = false;
     if (Array.isArray(state.messages)) {
       state.messages.forEach((m) => {
