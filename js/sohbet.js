@@ -5,7 +5,8 @@ import {
   getDeviceRole,
   setMyTypingStatus,
   isPartnerTyping,
-  requestMediaPermissionSafe
+  requestMediaPermissionSafe,
+  openGalleryLightbox
 } from "./state.js";
 
 const EMOJIS = [
@@ -31,7 +32,6 @@ const EMOJIS = [
 const QUICK_REACTIONS = ["❤️", "😂", "😍", "🥺", "🔥"];
 const RING_TIMEOUT_SECONDS = 60;
 
-let activeLightboxSrc = null;
 let callStream = null;
 let callPhase = null; // null | "ringing" | "connected"
 let callDirection = null; // null | "outgoing" | "incoming"
@@ -239,91 +239,28 @@ function renderReceipt(msg) {
   `;
 }
 
-function openPhotoLightbox(src) {
-  if (!src) return;
-  activeLightboxSrc = src;
+function openChatPhotoGallery(clickedSrc) {
+  const gallery = [];
+  if (state.pendingPhoto) {
+    gallery.push({
+      src: state.pendingPhoto,
+      title: "Gönderilecek fotoğraf önizlemesi"
+    });
+  }
+  state.messages
+    .filter((m) => m.type === "image" && m.src)
+    .forEach((m) => {
+      gallery.push({
+        src: m.src,
+        title: m.text || `Sohbet fotoğrafı · ${m.time || ""}`
+      });
+    });
 
-  document.getElementById("photo-lightbox-overlay")?.remove();
-
-  let scale = 1;
-
-  const overlay = document.createElement("div");
-  overlay.id = "photo-lightbox-overlay";
-  overlay.className = "photo-lightbox";
-  overlay.innerHTML = `
-    <div class="lightbox-bar">
-      <span class="status-pill" id="zoom-percent-pill">100%</span>
-      <div class="lightbox-controls">
-        <button type="button" class="lightbox-btn" id="zoom-out-btn">-</button>
-        <button type="button" class="lightbox-btn" id="zoom-reset-btn">1x</button>
-        <button type="button" class="lightbox-btn" id="zoom-in-btn">+</button>
-        <button type="button" class="lightbox-btn" id="close-lightbox-btn">Kapat</button>
-      </div>
-    </div>
-    <div class="lightbox-stage" id="lightbox-stage">
-      <img src="${src}" alt="Büyütülmüş fotoğraf" class="lightbox-img" id="lightbox-img" />
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-
-  const img = document.getElementById("lightbox-img");
-  const stage = document.getElementById("lightbox-stage");
-  const pill = document.getElementById("zoom-percent-pill");
-
-  const applyScale = (nextScale) => {
-    scale = Math.min(4, Math.max(1, Number(nextScale.toFixed(2))));
-    img.style.transform = `scale(${scale})`;
-    img.classList.toggle("zoomed", scale > 1);
-    pill.textContent = `${Math.round(scale * 100)}%`;
-  };
-
-  const closeLightbox = () => {
-    activeLightboxSrc = null;
-    document.removeEventListener("keydown", onKeyDown);
-    overlay.remove();
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "Escape") closeLightbox();
-  };
-
-  document.addEventListener("keydown", onKeyDown);
-
-  document.getElementById("zoom-in-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(scale + 0.5);
-  });
-
-  document.getElementById("zoom-out-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(scale - 0.5);
-  });
-
-  document.getElementById("zoom-reset-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(1);
-  });
-
-  document.getElementById("close-lightbox-btn").addEventListener("click", closeLightbox);
-
-  stage.addEventListener("click", (e) => {
-    if (e.target === stage) closeLightbox();
-  });
-
-  img.addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(scale > 1 ? 1 : 2);
-  });
-
-  stage.addEventListener(
-    "wheel",
-    (e) => {
-      e.preventDefault();
-      applyScale(scale + (e.deltaY < 0 ? 0.25 : -0.25));
-    },
-    { passive: false }
+  const idx = Math.max(
+    0,
+    gallery.findIndex((item) => item.src === clickedSrc)
   );
+  openGalleryLightbox(gallery, idx);
 }
 
 function buildSearchResultsHtml(query) {
@@ -496,7 +433,7 @@ function renderPeerInfoModal(contentEl) {
     document.querySelectorAll("[data-open-media-photo]").forEach((imgEl) => {
       imgEl.addEventListener("click", (e) => {
         e.stopPropagation();
-        openPhotoLightbox(imgEl.dataset.openMediaPhoto);
+        openChatPhotoGallery(imgEl.dataset.openMediaPhoto);
       });
     });
   };
@@ -549,7 +486,7 @@ export function renderSohbet(
             if (msg.type === "text") {
               body = `<span>${msg.text}</span>`;
             } else if (msg.type === "image") {
-              body = `<img src="${msg.src}" alt="Gönderilen fotoğraf" class="msg-photo" data-open-photo="${msg.src}" />${
+              body = `<img src="${msg.src}" alt="Gönderilen fotoğraf" class="msg-photo" style="cursor:pointer;" data-open-photo="${msg.src}" />${
                 msg.text ? `<span>${msg.text}</span>` : ""
               }`;
             } else if (msg.type === "audio") {
@@ -713,7 +650,13 @@ export function renderSohbet(
     ? `
       <div class="preview-box">
         <div style="display:flex;align-items:center;gap:10px;">
-          <img src="${state.pendingPhoto}" alt="Önizleme" class="preview-thumb" />
+          <img
+            src="${state.pendingPhoto}"
+            alt="Önizleme"
+            id="chat-preview-thumb"
+            class="preview-thumb"
+            style="cursor:pointer;"
+          />
           <span class="muted-note">Fotoğraf gönderilmeye hazır</span>
         </div>
         <button class="tool-btn" id="clear-photo-btn">İptal</button>
@@ -793,10 +736,6 @@ export function renderSohbet(
     renderPeerInfoModal(contentEl);
   }
 
-  if (activeLightboxSrc) {
-    openPhotoLightbox(activeLightboxSrc);
-  }
-
   document.getElementById("open-peer-sheet-btn").addEventListener("click", () => {
     openPeerInfoModal(contentEl);
   });
@@ -825,10 +764,15 @@ export function renderSohbet(
     panel.scrollTop = panel.scrollHeight;
   }
 
+  document.getElementById("chat-preview-thumb")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (state.pendingPhoto) openChatPhotoGallery(state.pendingPhoto);
+  });
+
   document.querySelectorAll("[data-open-photo]").forEach((photoEl) => {
     photoEl.addEventListener("click", (e) => {
       e.stopPropagation();
-      openPhotoLightbox(photoEl.dataset.openPhoto);
+      openChatPhotoGallery(photoEl.dataset.openPhoto);
     });
   });
 
