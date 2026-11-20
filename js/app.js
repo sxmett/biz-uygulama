@@ -3,7 +3,8 @@ import {
   setAdminOwner,
   initRealtimeSync,
   getDeviceRole,
-  setDeviceRole
+  setDeviceRole,
+  requestNotificationPermissionSafe
 } from "./state.js";
 import { renderBiz, clearBizClock } from "./biz.js";
 import { renderSohbet, markIncomingMessagesAsRead } from "./sohbet.js";
