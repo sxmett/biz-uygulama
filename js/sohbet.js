@@ -182,7 +182,7 @@ function blobToDataUrl(blob) {
 }
 
 function getSenderLabel(sender) {
-  return sender === "me" ? state.myName || "Samet" : state.partnerName || "Emine";
+  return sender === "me" ? state.myName || "Sen" : state.partnerName || "Partner";
 }
 
 function getMessagePreviewText(msg) {
@@ -418,7 +418,7 @@ function handlePeerModalEsc(e) {
 function renderPeerInfoModal(contentEl) {
   if (!peerModalOpen) return;
 
-  const partnerLabel = state.partnerName || "Emine";
+  const partnerLabel = state.partnerName || "Partner";
   const bodyHtml =
     peerModalTab === "search"
       ? `
@@ -530,70 +530,81 @@ export function renderSohbet(
   const prevPanel = document.getElementById("messages-panel");
   const prevScrollTop = prevPanel ? prevPanel.scrollTop : 0;
 
-  const messagesHtml = state.messages
-    .map((msg) => {
-      if (msg.type === "call") {
-        return `
-          <div class="call-log-item">
-            <strong>${msg.text}</strong>
-            <span class="call-log-time">${msg.time}</span>
-          </div>
-        `;
-      }
+  const partnerLabel = state.partnerName || "Partner";
 
-      let body = "";
-      if (msg.type === "text") {
-        body = `<span>${msg.text}</span>`;
-      } else if (msg.type === "image") {
-        body = `<img src="${msg.src}" alt="Gönderilen fotoğraf" class="msg-photo" data-open-photo="${msg.src}" />${
-          msg.text ? `<span>${msg.text}</span>` : ""
-        }`;
-      } else if (msg.type === "audio") {
-        body = msg.src
-          ? `<audio controls src="${msg.src}"></audio>`
-          : `<span class="muted-note">Ses kaydı bulunamadı</span>`;
-      }
+  const messagesHtml =
+    state.messages.length > 0
+      ? state.messages
+          .map((msg) => {
+            if (msg.type === "call") {
+              return `
+                <div class="call-log-item">
+                  <strong>${msg.text}</strong>
+                  <span class="call-log-time">${msg.time}</span>
+                </div>
+              `;
+            }
 
-      const replyQuoteHtml = msg.replyTo
-        ? `
-          <div class="msg-reply-quote">
-            <span class="msg-reply-author">${msg.replyTo.author}</span>
-            <span class="msg-reply-text">${msg.replyTo.text}</span>
-          </div>
-        `
-        : "";
+            let body = "";
+            if (msg.type === "text") {
+              body = `<span>${msg.text}</span>`;
+            } else if (msg.type === "image") {
+              body = `<img src="${msg.src}" alt="Gönderilen fotoğraf" class="msg-photo" data-open-photo="${msg.src}" />${
+                msg.text ? `<span>${msg.text}</span>` : ""
+              }`;
+            } else if (msg.type === "audio") {
+              body = msg.src
+                ? `<audio controls src="${msg.src}"></audio>`
+                : `<span class="muted-note">Ses kaydı bulunamadı</span>`;
+            }
 
-      const showPicker = state.activeReactionMsgId === msg.id;
-      const popoverHtml = showPicker
-        ? `
-          <div class="reaction-popover" data-reaction-box="${msg.id}">
-            ${QUICK_REACTIONS.map(
-              (em) =>
-                `<button type="button" class="reaction-pick-btn ${
-                  msg.reaction === em ? "active" : ""
-                }" data-react="${msg.id}|${em}">${em}</button>`
-            ).join("")}
-            <button type="button" class="reply-action-btn" data-reply-msg="${msg.id}">Yanıtla</button>
-          </div>
-        `
-        : "";
+            const replyQuoteHtml = msg.replyTo
+              ? `
+                <div class="msg-reply-quote">
+                  <span class="msg-reply-author">${msg.replyTo.author}</span>
+                  <span class="msg-reply-text">${msg.replyTo.text}</span>
+                </div>
+              `
+              : "";
 
-      return `
-        <div class="msg-wrap ${msg.sender}" data-msg-wrap="${msg.id}">
-          <div class="msg ${msg.sender}" data-msg-bubble="${msg.id}">
-            ${replyQuoteHtml}
-            ${body}
-            <div class="msg-meta-row">
-              <span>${msg.time}</span>
-              ${renderReceipt(msg)}
-            </div>
-          </div>
-          ${msg.reaction ? `<span class="reaction-chip">${msg.reaction}</span>` : ""}
-          ${popoverHtml}
+            const showPicker = state.activeReactionMsgId === msg.id;
+            const popoverHtml = showPicker
+              ? `
+                <div class="reaction-popover" data-reaction-box="${msg.id}">
+                  ${QUICK_REACTIONS.map(
+                    (em) =>
+                      `<button type="button" class="reaction-pick-btn ${
+                        msg.reaction === em ? "active" : ""
+                      }" data-react="${msg.id}|${em}">${em}</button>`
+                  ).join("")}
+                  <button type="button" class="reply-action-btn" data-reply-msg="${msg.id}">Yanıtla</button>
+                </div>
+              `
+              : "";
+
+            return `
+              <div class="msg-wrap ${msg.sender}" data-msg-wrap="${msg.id}">
+                <div class="msg ${msg.sender}" data-msg-bubble="${msg.id}">
+                  ${replyQuoteHtml}
+                  ${body}
+                  <div class="msg-meta-row">
+                    <span>${msg.time}</span>
+                    ${renderReceipt(msg)}
+                  </div>
+                </div>
+                ${msg.reaction ? `<span class="reaction-chip">${msg.reaction}</span>` : ""}
+                ${popoverHtml}
+              </div>
+            `;
+          })
+          .join("")
+      : `
+        <div class="card" style="margin:auto;text-align:center;max-width:320px;">
+          <div class="label" style="margin-bottom:6px;">Sohbet Hazır</div>
+          <strong>${partnerLabel} ile özel alanın açıldı</strong>
+          <p class="muted-note" style="margin-top:6px;">Henüz mesaj yok. İlk mesajını göndererek sohbete başlayabilirsin.</p>
         </div>
       `;
-    })
-    .join("");
 
   const activeReplyMsg = replyingToMsgId
     ? state.messages.find((m) => m.id === replyingToMsgId)
@@ -615,10 +626,9 @@ export function renderSohbet(
   const isRinging = state.callMode && callPhase === "ringing";
   const isConnected = state.callMode && callPhase === "connected";
   const isIncomingCall = isRinging && callDirection === "incoming";
-  const partnerLabel = state.partnerName || "Emine";
   const subStatusText = isPartnerTyping()
     ? "yazıyor..."
-    : `${state.partnerMood} · ${Number(state.distanceKm).toFixed(1)} km`;
+    : `${state.partnerMood || "Çevrimiçi"} · ${Number(state.distanceKm).toFixed(1)} km`;
   const callKindText = state.callMode === "video" ? "görüntülü" : "sesli";
 
   const incomingCardHtml = isIncomingCall
