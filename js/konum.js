@@ -63,7 +63,7 @@ function formatDistance(kmValue) {
 }
 
 function getFillPercent(myCoords, partnerCoords, kmValue) {
-  if (!myCoords || !partnerCoords) return 18;
+  if (!myCoords || !partnerCoords) return 20;
   const km = Number(kmValue || 0);
   if (km <= 0.2) return 100;
   if (km >= 50) return 24;
@@ -81,7 +81,7 @@ async function acquireDevicePosition() {
       try {
         await capGeo.requestPermissions();
       } catch {
-        // İzin zaten verilmiş veya kullanıcı reddetmiş olabilir
+        // İzin durumu kontrol edilecek
       }
     }
     const pos = await capGeo.getCurrentPosition({
@@ -97,7 +97,7 @@ async function acquireDevicePosition() {
   }
 
   if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
-    throw new Error("Bu cihazda konum servisi desteklenmiyor.");
+    throw new Error("Bu ortamda konum servisi bulunamadı.");
   }
 
   const getPosWithOptions = (options) =>
@@ -117,13 +117,13 @@ async function acquireDevicePosition() {
   try {
     return await getPosWithOptions({
       enableHighAccuracy: true,
-      timeout: 9000,
-      maximumAge: 10000
+      timeout: 8000,
+      maximumAge: 15000
     });
   } catch {
     return await getPosWithOptions({
       enableHighAccuracy: false,
-      timeout: 15000,
+      timeout: 14000,
       maximumAge: 60000
     });
   }
@@ -132,15 +132,15 @@ async function acquireDevicePosition() {
 function explainGeoError(err) {
   const code = err?.code;
   if (code === 1) {
-    return "Konum izni kapalı. Telefon Ayarları -> Uygulamalar -> Konum iznini 'İzin ver' yap.";
+    return "Konum izni reddedildi veya kapalı. Telefon Ayarları -> Uygulamalar -> Konum iznini açıp tekrar dene ya da aşağıdan koordinat gir.";
   }
   if (code === 2) {
-    return "GPS / Konum sinyali alınamadı. Telefonun Konum (GPS) servisinin açık olduğundan emin ol.";
+    return "GPS / Konum sinyali alınamadı. Telefonun Konum servisini aç veya aşağıdan koordinat gir.";
   }
   if (code === 3) {
-    return "Konum alma süresi doldu. Açık alanda veya Wi-Fi/GPS açıkken tekrar dene.";
+    return "GPS yanıt vermedi (zaman aşımı). Dilersen aşağıdan koordinat/yer adı girerek hemen kaydedebilirsin.";
   }
-  return err?.message || "Konum alınamadı. Konum iznini ve GPS'i kontrol et.";
+  return `${err?.message || "GPS konumu çekilemedi."} Dilersen aşağıdan koordinat/yer adı girerek kaydedebilirsin.`;
 }
 
 export function renderKonum(contentEl) {
@@ -214,7 +214,7 @@ export function renderKonum(contentEl) {
 
       <div class="card loc-person-card mine">
         <div class="row-between">
-          <div class="label">SENİN KONUMUN (${myName.toUpperCase()})</div>
+          <div class="label">SENİN KONUMUN · ${myName.toUpperCase()}</div>
           <span class="badge">${myUpdatedText}</span>
         </div>
         <h3 style="margin:6px 0 4px;">${myPlaceText}</h3>
@@ -224,7 +224,7 @@ export function renderKonum(contentEl) {
             : `<div class="loc-coords-pill">Henüz koordinat eklenmedi</div>`
         }
 
-        <div class="row" style="gap:8px;margin-top:12px;margin-bottom:10px;">
+        <div class="row" style="gap:8px;margin-top:12px;margin-bottom:8px;">
           <input
             type="text"
             id="location-label-input"
@@ -235,16 +235,38 @@ export function renderKonum(contentEl) {
           <button type="button" class="tool-btn" id="save-location-label-btn">Kaydet</button>
         </div>
 
-        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
+        <div class="loc-manual-grid">
+          <input
+            type="number"
+            step="any"
+            id="location-lat-input"
+            class="msg-input plain-input"
+            placeholder="Enlem (Örn: 39.9334)"
+            value="${myCoords ? myCoords.lat : ""}"
+          />
+          <input
+            type="number"
+            step="any"
+            id="location-lng-input"
+            class="msg-input plain-input"
+            placeholder="Boylam (Örn: 32.8597)"
+            value="${myCoords ? myCoords.lng : ""}"
+          />
+        </div>
+
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
           <button type="button" class="send-btn" id="get-my-location-btn">Konumumu Al</button>
+          <button type="button" class="tool-btn" id="save-coords-btn">Koordinatı Kaydet</button>
           <span id="location-status-note" class="muted-note"></span>
         </div>
+
+        <div id="location-success-box" class="loc-success-box" style="display:none;"></div>
         <div id="location-error-box" class="loc-error-box" style="display:none;"></div>
       </div>
 
       <div class="card loc-person-card partner">
         <div class="row-between">
-          <div class="label">SEVGİLİNİN KONUMU (${partnerName.toUpperCase()})</div>
+          <div class="label">SEVGİLİNİN KONUMU · ${partnerName.toUpperCase()}</div>
           <span class="badge">${partnerUpdatedText}</span>
         </div>
         <h3 style="margin:6px 0 4px;">${partnerPlaceText}</h3>
@@ -258,15 +280,31 @@ export function renderKonum(contentEl) {
     </div>
   `;
 
+  const showSuccess = (msg) => {
+    const okBox = document.getElementById("location-success-box");
+    const errBox = document.getElementById("location-error-box");
+    if (errBox) errBox.style.display = "none";
+    if (okBox) {
+      okBox.style.display = "block";
+      okBox.textContent = msg;
+    }
+  };
+
+  const showError = (msg) => {
+    const okBox = document.getElementById("location-success-box");
+    const errBox = document.getElementById("location-error-box");
+    if (okBox) okBox.style.display = "none";
+    if (errBox) {
+      errBox.style.display = "block";
+      errBox.textContent = msg;
+    }
+  };
+
   document.getElementById("save-location-label-btn")?.addEventListener("click", () => {
     const inputEl = document.getElementById("location-label-input");
-    const errBox = document.getElementById("location-error-box");
     const label = (inputEl?.value || "").trim();
     if (!label) {
-      if (errBox) {
-        errBox.style.display = "block";
-        errBox.textContent = "Önce bir yer adı yazmalısın (örneğin Ev veya İş).";
-      }
+      showError("Önce bir yer adı yazmalısın (örneğin Ev veya Kampüs).");
       return;
     }
 
@@ -282,15 +320,44 @@ export function renderKonum(contentEl) {
     renderKonum(contentEl);
   });
 
+  document.getElementById("save-coords-btn")?.addEventListener("click", () => {
+    const latVal = Number(document.getElementById("location-lat-input")?.value);
+    const lngVal = Number(document.getElementById("location-lng-input")?.value);
+    const labelVal = (document.getElementById("location-label-input")?.value || "").trim();
+
+    if (!Number.isFinite(latVal) || !Number.isFinite(lngVal) || (latVal === 0 && lngVal === 0)) {
+      showError("Geçerli bir enlem ve boylam değeri gir (örneğin 39.9334 ve 32.8597).");
+      return;
+    }
+
+    const lat = Number(latVal.toFixed(6));
+    const lng = Number(lngVal.toFixed(6));
+
+    const updated = {
+      ...(myLoc || {}),
+      role,
+      label: labelVal || myLoc?.label || `${lat}, ${lng}`,
+      lat,
+      lng,
+      updatedAt: nowTime()
+    };
+
+    writeMyLocation(role, updated);
+
+    if (partnerCoords) {
+      state.distanceKm = Number(
+        haversineKm(lat, lng, partnerCoords.lat, partnerCoords.lng).toFixed(1)
+      );
+    }
+
+    saveState({ pushCloud: true });
+    renderKonum(contentEl);
+  });
+
   document.getElementById("get-my-location-btn")?.addEventListener("click", async () => {
     const btnEl = document.getElementById("get-my-location-btn");
     const statusNote = document.getElementById("location-status-note");
-    const errBox = document.getElementById("location-error-box");
 
-    if (errBox) {
-      errBox.style.display = "none";
-      errBox.textContent = "";
-    }
     if (statusNote) statusNote.textContent = "Konum alınıyor...";
     if (btnEl) btnEl.disabled = true;
 
@@ -318,13 +385,11 @@ export function renderKonum(contentEl) {
 
       saveState({ pushCloud: true });
       renderKonum(contentEl);
+      showSuccess(`Konumun güncellendi: ${lat}, ${lng}`);
     } catch (err) {
       if (btnEl) btnEl.disabled = false;
       if (statusNote) statusNote.textContent = "";
-      if (errBox) {
-        errBox.style.display = "block";
-        errBox.textContent = explainGeoError(err);
-      }
+      showError(explainGeoError(err));
     }
   });
 }
