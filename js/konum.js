@@ -70,6 +70,59 @@ function getFillPercent(myCoords, partnerCoords, kmValue) {
   return Math.max(25, Math.min(96, Math.round(100 - (km / 50) * 71)));
 }
 
+function buildMapsUrl(coords, labelText) {
+  if (!coords) return "#";
+  const q = encodeURIComponent(labelText ? `${coords.lat},${coords.lng} (${labelText})` : `${coords.lat},${coords.lng}`);
+  return `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
+
+async function fetchShortCityDistrict(lat, lng) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+      lat
+    )}&lon=${encodeURIComponent(lng)}&zoom=12&addressdetails=1&accept-language=tr`;
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" }
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const addr = data?.address || {};
+
+    const district =
+      addr.county ||
+      addr.town ||
+      addr.district ||
+      addr.city_district ||
+      addr.suburb ||
+      "";
+
+    const city =
+      addr.province ||
+      addr.state ||
+      addr.city ||
+      addr.region ||
+      "";
+
+    const cleanDistrict = String(district).trim();
+    const cleanCity = String(city).trim();
+
+    if (cleanDistrict && cleanCity && cleanDistrict.toLowerCase() !== cleanCity.toLowerCase()) {
+      return `${cleanDistrict}, ${cleanCity}`;
+    }
+    return cleanCity || cleanDistrict || null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function withTimeout(promise, ms, msg = "Konum alma süresi doldu.") {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(msg)), ms);
@@ -236,7 +289,8 @@ export function renderKonum(contentEl) {
   const distanceText = formatDistance(kmValue);
   const fillPercent = getFillPercent(myCoords, partnerCoords, kmValue);
 
-  const myPlaceText = myLoc?.label || (myCoords ? `${myCoords.lat}, ${myCoords.lng}` : "Henüz paylaşılmadı");
+  const myPlaceText =
+    myLoc?.label || (myCoords ? `${myCoords.lat}, ${myCoords.lng}` : "Henüz paylaşılmadı");
   const myUpdatedText = myLoc?.updatedAt ? `Güncel: ${myLoc.updatedAt}` : "Güncel: Henüz güncellenmedi";
 
   const partnerPlaceText =
@@ -245,13 +299,16 @@ export function renderKonum(contentEl) {
     ? `Güncel: ${partnerLoc.updatedAt}`
     : "Güncel: Henüz güncellenmedi";
 
+  const myMapUrl = buildMapsUrl(myCoords, myPlaceText);
+  const partnerMapUrl = buildMapsUrl(partnerCoords, partnerPlaceText);
+
   const statusSummary =
     myCoords && partnerCoords
       ? `İki konum da güncel · Aradaki mesafe: ${distanceText}`
       : myCoords
-      ? `${myName} konumunu paylaştı · ${partnerName} bekleniyor`
+      ? `${myName} konumunu paylaştı (${myPlaceText}) · ${partnerName} bekleniyor`
       : partnerCoords
-      ? `${partnerName} konumunu paylaştı · Sıra sende`
+      ? `${partnerName} konumunu paylaştı (${partnerPlaceText}) · Sıra sende`
       : `Konumunu paylaştığında mesafe köprüsü burada canlanır`;
 
   contentEl.innerHTML = `
@@ -300,6 +357,12 @@ export function renderKonum(contentEl) {
 
         <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;">
           <button type="button" class="send-btn" id="get-my-location-btn">Konumumu Al</button>
+          <a
+            href="${myMapUrl}"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="loc-map-link-btn ${myCoords ? "" : "disabled"}"
+          >Haritada Aç</a>
           <span id="location-status-note" class="muted-note"></span>
         </div>
 
@@ -318,7 +381,15 @@ export function renderKonum(contentEl) {
             ? `<div class="loc-coords-pill">Enlem: ${partnerCoords.lat} · Boylam: ${partnerCoords.lng}</div>`
             : `<div class="loc-coords-pill">Henüz konum paylaşılmadı</div>`
         }
-        <div class="muted-note" style="margin-top:8px;">Aradaki mesafe: ${distanceText}</div>
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+          <a
+            href="${partnerMapUrl}"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="loc-map-link-btn ${partnerCoords ? "" : "disabled"}"
+          >Haritada Aç</a>
+          <span class="muted-note">Aradaki mesafe: ${distanceText}</span>
+        </div>
       </div>
     </div>
   `;
@@ -347,12 +418,13 @@ export function renderKonum(contentEl) {
     const btnEl = document.getElementById("get-my-location-btn");
     const statusNote = document.getElementById("location-status-note");
 
-    if (statusNote) statusNote.textContent = "Konum alınıyor...";
+    if (statusNote) statusNote.textContent = "Konum ve il/ilçe alınıyor...";
     if (btnEl) btnEl.disabled = true;
 
     try {
       const { lat, lng } = await acquireDevicePosition();
-      const label = `${lat}, ${lng}`;
+      const shortPlace = await fetchShortCityDistrict(lat, lng);
+      const label = shortPlace || `${lat}, ${lng}`;
 
       const updated = {
         ...(myLoc || {}),
@@ -365,15 +437,17 @@ export function renderKonum(contentEl) {
 
       writeMyLocation(role, updated);
 
-      if (partnerCoords) {
+      const latestPartnerLoc = resolveLocations().partnerLoc;
+      const latestPartnerCoords = getCoords(latestPartnerLoc);
+      if (latestPartnerCoords) {
         state.distanceKm = Number(
-          haversineKm(lat, lng, partnerCoords.lat, partnerCoords.lng).toFixed(1)
+          haversineKm(lat, lng, latestPartnerCoords.lat, latestPartnerCoords.lng).toFixed(1)
         );
       }
 
       saveState({ pushCloud: true });
       renderKonum(contentEl);
-      showSuccess(`Konumun güncellendi: ${lat}, ${lng}`);
+      showSuccess(`Konum güncellendi: ${label}`);
     } catch (err) {
       if (btnEl) btnEl.disabled = false;
       if (statusNote) statusNote.textContent = "";
