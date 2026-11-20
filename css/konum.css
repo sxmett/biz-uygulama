@@ -105,7 +105,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 800;
   color: #211b28;
 }
@@ -128,7 +128,7 @@
 
 .loc-time-tag {
   font-size: 11.5px;
-  color: #776d82;
+  color: #6f657a;
   background: #f6f3fa;
   padding: 4px 10px;
   border-radius: 999px;
@@ -145,7 +145,7 @@
   font-size: 12px;
   color: #4f4659;
   background: #f8f5fc;
-  border: 1px solid rgba(118, 85, 247, 0.1);
+  border: 1px solid rgba(118, 85, 247, 0.12);
   padding: 8px 12px;
   border-radius: 13px;
   font-variant-numeric: tabular-nums;
