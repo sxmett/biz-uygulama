@@ -1,7 +1,7 @@
 import { db, ref, set, onValue } from "./firebase.js";
 
-const STORAGE_KEY = "biz_app_state_v2";
-const LEGACY_STORAGE_KEY = "biz_app_state_v1";
+const STORAGE_KEY = "biz_app_state_v3";
+const LEGACY_KEYS = ["biz_app_state_v1", "biz_app_state_v2"];
 const ADMIN_OWNER_KEY = "biz_admin_owner_v1";
 const DEVICE_ROLE_KEY = "biz_device_role_v1"; // "userA" (Samet) | "userB" (Emine)
 const SHARED_ROOM_PATH = "biz_room/shared_state";
@@ -13,32 +13,17 @@ export function getLocalDayKey(dateObj = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
-function createDefaultUserProfile(role) {
-  if (role === "userB") {
-    return {
-      name: "Emine",
-      avatar: null,
-      mood: "Uyuyor",
-      note: "Akşam müsait olduğumda ilk seni arayacağım.",
-      location: {
-        lat: 39.9208,
-        lon: 32.8541,
-        label: "Kızılay civarı",
-        updatedAt: "Az önce"
-      },
-      missCount: 0
-    };
-  }
+function createEmptyUserProfile(role) {
   return {
-    name: "Samet",
+    name: role === "userB" ? "Emine" : "Samet",
     avatar: null,
-    mood: "Seni özledi",
-    note: "Seni düşünüyorum.",
+    mood: "Uyuyor",
+    note: "",
     location: {
       lat: null,
       lon: null,
-      label: "Henüz yazılmadı",
-      updatedAt: "Az önce"
+      label: "Henüz paylaşılmadı",
+      updatedAt: "Henüz güncellenmedi"
     },
     missCount: 0
   };
@@ -52,16 +37,16 @@ export const defaultState = {
     date: "2026-12-12T00:00:00"
   },
   userProfiles: {
-    userA: createDefaultUserProfile("userA"),
-    userB: createDefaultUserProfile("userB")
+    userA: createEmptyUserProfile("userA"),
+    userB: createEmptyUserProfile("userB")
   },
   myName: "Samet",
   partnerName: "Emine",
   myAvatar: null,
   partnerAvatar: null,
   partnerMood: "Uyuyor",
-  partnerNote: "Akşam müsait olduğumda ilk seni arayacağım.",
-  myNote: "Seni düşünüyorum.",
+  partnerNote: "",
+  myNote: "",
   moods: ["Uyuyor", "Seni özledi", "Derste / Çalışıyor", "Yolda"],
   missCount: 0,
   myMissCount: 0,
@@ -72,16 +57,16 @@ export const defaultState = {
   myLocation: {
     lat: null,
     lon: null,
-    label: "Henüz yazılmadı",
-    updatedAt: "Az önce"
+    label: "Henüz paylaşılmadı",
+    updatedAt: "Henüz güncellenmedi"
   },
   partnerLocation: {
-    lat: 39.9208,
-    lon: 32.8541,
-    label: "Kızılay civarı",
-    updatedAt: "Az önce"
+    lat: null,
+    lon: null,
+    label: "Henüz paylaşılmadı",
+    updatedAt: "Henüz güncellenmedi"
   },
-  distanceKm: 3.4,
+  distanceKm: 0,
   emojiPickerOpen: false,
   pendingPhoto: null,
   callMode: null,
@@ -92,40 +77,10 @@ export const defaultState = {
     userA: false,
     userB: false
   },
-  messages: [
-    {
-      id: 1,
-      sender: "them",
-      authorRole: "userB",
-      type: "text",
-      text: "Selam, bugün nasıl geçiyor?",
-      time: "10:15",
-      status: "read",
-      reaction: null
-    },
-    {
-      id: 2,
-      sender: "me",
-      authorRole: "userA",
-      type: "text",
-      text: "Güzel geçiyor, seninle sohbet alanını düzenliyorum.",
-      time: "10:16",
-      status: "read",
-      reaction: "❤️"
-    }
-  ],
+  messages: [],
   pendingMemoryPhoto: null,
   confirmDeleteId: null,
-  memories: [
-    {
-      id: 1,
-      title: "İlk Kahve Buluşması",
-      date: "14 Şubat",
-      author: "Samet",
-      photo: null,
-      note: "En sevdiğimiz köşe masası ve uzun uzun sohbet."
-    }
-  ],
+  memories: [],
   mediaRecorder: null,
   audioChunks: [],
   isAdminOwner: false
@@ -148,13 +103,13 @@ export function getDeviceRole() {
   }
 }
 
-function getPartnerRole(role) {
+export function getPartnerRole(role = getDeviceRole()) {
   return role === "userB" ? "userA" : "userB";
 }
 
 function ensureProfilesExist(source) {
-  const baseA = createDefaultUserProfile("userA");
-  const baseB = createDefaultUserProfile("userB");
+  const baseA = createEmptyUserProfile("userA");
+  const baseB = createEmptyUserProfile("userB");
   const rawA = source?.userProfiles?.userA || {};
   const rawB = source?.userProfiles?.userB || {};
 
@@ -194,18 +149,27 @@ export function syncRoleViewFields() {
   state.partnerMissCount = Number(partner.missCount) || 0;
   state.missCount = state.myMissCount + state.partnerMissCount;
 
-  if (
-    state.myLocation.lat !== null &&
-    state.myLocation.lon !== null &&
-    state.partnerLocation.lat !== null &&
-    state.partnerLocation.lon !== null
-  ) {
+  const hasMyCoords =
+    typeof state.myLocation.lat === "number" &&
+    typeof state.myLocation.lon === "number" &&
+    Number.isFinite(state.myLocation.lat) &&
+    Number.isFinite(state.myLocation.lon);
+
+  const hasPartnerCoords =
+    typeof state.partnerLocation.lat === "number" &&
+    typeof state.partnerLocation.lon === "number" &&
+    Number.isFinite(state.partnerLocation.lat) &&
+    Number.isFinite(state.partnerLocation.lon);
+
+  if (hasMyCoords && hasPartnerCoords) {
     state.distanceKm = calculateDistanceKm(
-      Number(state.myLocation.lat),
-      Number(state.myLocation.lon),
-      Number(state.partnerLocation.lat),
-      Number(state.partnerLocation.lon)
+      state.myLocation.lat,
+      state.myLocation.lon,
+      state.partnerLocation.lat,
+      state.partnerLocation.lon
     );
+  } else {
+    state.distanceKm = 0;
   }
 }
 
@@ -288,7 +252,7 @@ export function setAdminOwner(enabled) {
 
 function loadSavedState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -338,46 +302,18 @@ function applySharedSnapshot(dataSource) {
     mergedProfiles.userB.missCount = 0;
   }
 
-  // Eski şema uyumluluğu: userProfiles boşsa düz alanlardan doldur
-  if (!dataSource.userProfiles) {
-    const actor = dataSource.updatedBy === "userB" ? "userB" : "userA";
-    const partner = getPartnerRole(actor);
-    if (typeof dataSource.myName === "string") mergedProfiles[actor].name = dataSource.myName;
-    if (typeof dataSource.partnerName === "string") mergedProfiles[partner].name = dataSource.partnerName;
-    if (typeof dataSource.myAvatar === "string") mergedProfiles[actor].avatar = dataSource.myAvatar;
-    if (typeof dataSource.partnerAvatar === "string") mergedProfiles[partner].avatar = dataSource.partnerAvatar;
-    if (typeof dataSource.myNote === "string") mergedProfiles[actor].note = dataSource.myNote;
-    if (typeof dataSource.partnerMood === "string") mergedProfiles[partner].mood = dataSource.partnerMood;
-    if (dataSource.myLocation && typeof dataSource.myLocation === "object") {
-      mergedProfiles[actor].location = { ...mergedProfiles[actor].location, ...dataSource.myLocation };
-    }
-    if (dataSource.partnerLocation && typeof dataSource.partnerLocation === "object") {
-      mergedProfiles[partner].location = {
-        ...mergedProfiles[partner].location,
-        ...dataSource.partnerLocation
-      };
-    }
-    if (sameDay) {
-      if (typeof dataSource.myMissCount === "number") mergedProfiles[actor].missCount = dataSource.myMissCount;
-      if (typeof dataSource.partnerMissCount === "number") mergedProfiles[partner].missCount = dataSource.partnerMissCount;
-    }
-  }
-
   state.userProfiles = mergedProfiles;
   state.missDayKey = todayKey;
   state.lastMissTime =
-    typeof dataSource.lastMissTime === "string" ? dataSource.lastMissTime : state.lastMissTime;
+    typeof dataSource.lastMissTime === "string" ? dataSource.lastMissTime : null;
 
-  // Sohbet ve anılarda mevcut veriyi koru; boş dizi gelirse silme
-  if (Array.isArray(dataSource.messages) && (dataSource.messages.length > 0 || state.messages.length === 0)) {
-    state.messages = normalizeMessagesForRole(dataSource.messages);
-  } else {
-    state.messages = normalizeMessagesForRole(state.messages);
-  }
+  state.messages = Array.isArray(dataSource.messages)
+    ? normalizeMessagesForRole(dataSource.messages)
+    : [];
 
-  if (Array.isArray(dataSource.memories) && (dataSource.memories.length > 0 || state.memories.length === 0)) {
-    state.memories = JSON.parse(JSON.stringify(dataSource.memories));
-  }
+  state.memories = Array.isArray(dataSource.memories)
+    ? JSON.parse(JSON.stringify(dataSource.memories))
+    : [];
 
   state.typingByRole = {
     userA: Boolean(dataSource.typingByRole?.userA),
@@ -400,10 +336,8 @@ export const state = {
     ...defaultState.specialEvent,
     ...(saved.specialEvent || {})
   },
-  messages: Array.isArray(saved.messages)
-    ? normalizeMessagesForRole(saved.messages)
-    : normalizeMessagesForRole(defaultState.messages),
-  memories: Array.isArray(saved.memories) ? saved.memories : defaultState.memories,
+  messages: Array.isArray(saved.messages) ? normalizeMessagesForRole(saved.messages) : [],
+  memories: Array.isArray(saved.memories) ? saved.memories : [],
   typingByRole: {
     userA: Boolean(saved.typingByRole?.userA),
     userB: Boolean(saved.typingByRole?.userB)
@@ -549,19 +483,25 @@ export function applyImportedBackup(rawData) {
   return saveState({ pushCloud: true });
 }
 
-// ÖNEMLİ: Bu fonksiyon diğer tarafın veya ortak bulut verisinin üzerine boş/varsayılan veri YAZMAZ.
-// Yalnızca bu cihazın yerel önbelleğini ve geçici UI durumlarını sıfırlar.
+// Yerel verileri temizler; diğer tarafın veya ortak bulut verisinin üzerine boş kayıt basmaz.
 export function resetAllPersistedData() {
   const keepAdmin = state.isAdminOwner;
-  const currentRole = getDeviceRole();
 
   try {
     localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
   } catch {
     // Sessiz geç
   }
 
+  state.userProfiles = {
+    userA: createEmptyUserProfile("userA"),
+    userB: createEmptyUserProfile("userB")
+  };
+  state.messages = [];
+  state.memories = [];
+  state.lastMissTime = null;
+  state.missDayKey = getLocalDayKey();
   state.activeTab = keepAdmin ? "admin" : "biz";
   state.emojiPickerOpen = false;
   state.pendingPhoto = null;
@@ -570,10 +510,7 @@ export function resetAllPersistedData() {
   state.activeReactionMsgId = null;
   state.isAdminOwner = keepAdmin;
 
-  if (currentRole) {
-    syncRoleViewFields();
-    state.messages = normalizeMessagesForRole(state.messages);
-  }
+  syncRoleViewFields();
 }
 
 export function nowTime() {
