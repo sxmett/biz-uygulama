@@ -1,64 +1,5 @@
 import { state, saveState, getDeviceRole, nowTime } from "./state.js";
 
-// Buraya Google Cloud'dan aldığın Maps JavaScript API anahtarını yaz:
-const GOOGLE_MAPS_API_KEY = "AIzaSyCTiezPlR3GFySZ9EdxnvMw1Rpf_U5AGAw";
-
-let mapInstance = null;
-let myMarker = null;
-let partnerMarker = null;
-let distanceLine = null;
-let mapsScriptPromise = null;
-
-function loadGoogleMapsApi() {
-  if (window.google && window.google.maps) {
-    return Promise.resolve(window.google.maps);
-  }
-
-  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY.startsWith("BURAYA_")) {
-    return Promise.reject(new Error("GOOGLE_MAPS_API_KEY eksik"));
-  }
-
-  if (mapsScriptPromise) {
-    return mapsScriptPromise;
-  }
-
-  mapsScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById("google-maps-js-sdk");
-    if (existing) {
-      existing.addEventListener("load", () => {
-        if (window.google && window.google.maps) resolve(window.google.maps);
-        else reject(new Error("Google Maps yüklenemedi"));
-      });
-      existing.addEventListener("error", () => reject(new Error("Google Maps script hatası")));
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "google-maps-js-sdk";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
-      GOOGLE_MAPS_API_KEY
-    )}&v=weekly`;
-    script.async = true;
-    script.defer = true;
-
-    script.onload = () => {
-      if (window.google && window.google.maps) {
-        resolve(window.google.maps);
-      } else {
-        reject(new Error("Google Maps nesnesi bulunamadı"));
-      }
-    };
-    script.onerror = () => {
-      mapsScriptPromise = null;
-      reject(new Error("Google Maps API yüklenemedi"));
-    };
-
-    document.head.appendChild(script);
-  });
-
-  return mapsScriptPromise;
-}
-
 function haversineKm(lat1, lng1, lat2, lng2) {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const R = 6371;
@@ -82,112 +23,22 @@ function getCoords(locObj) {
   return { lat, lng };
 }
 
-function computeDistanceLabel(myCoords, partnerCoords) {
-  if (myCoords && partnerCoords) {
-    const km = haversineKm(
-      myCoords.lat,
-      myCoords.lng,
-      partnerCoords.lat,
-      partnerCoords.lng
-    );
-    state.distanceKm = Number(km.toFixed(1));
-    return `${km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`}`;
-  }
-  const fallbackKm = Number(state.distanceKm || 0);
-  return `${fallbackKm.toFixed(1)} km`;
+function formatDistance(kmValue) {
+  const km = Number(kmValue || 0);
+  if (!Number.isFinite(km) || km <= 0) return "0.0 km";
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(1)} km`;
 }
 
-function initOrUpdateGoogleMap(myCoords, partnerCoords, myName, partnerName) {
-  const canvasEl = document.getElementById("google-map-canvas");
-  if (!canvasEl) return;
-
-  loadGoogleMapsApi()
-    .then((maps) => {
-      const defaultCenter = myCoords || partnerCoords || { lat: 39.9334, lng: 32.8597 };
-
-      if (!mapInstance) {
-        mapInstance = new maps.Map(canvasEl, {
-          center: defaultCenter,
-          zoom: 13,
-          gestureHandling: "greedy",
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: true,
-          zoomControl: true
-        });
-      }
-
-      if (myMarker) myMarker.setMap(null);
-      if (partnerMarker) partnerMarker.setMap(null);
-      if (distanceLine) distanceLine.setMap(null);
-
-      const bounds = new maps.LatLngBounds();
-      let pointCount = 0;
-
-      if (myCoords) {
-        myMarker = new maps.Marker({
-          position: myCoords,
-          map: mapInstance,
-          title: `${myName} (Sen)`,
-          label: {
-            text: (myName[0] || "S").toUpperCase(),
-            color: "#ffffff",
-            fontWeight: "700"
-          }
-        });
-        bounds.extend(myCoords);
-        pointCount += 1;
-      }
-
-      if (partnerCoords) {
-        partnerMarker = new maps.Marker({
-          position: partnerCoords,
-          map: mapInstance,
-          title: `${partnerName}`,
-          label: {
-            text: (partnerName[0] || "P").toUpperCase(),
-            color: "#ffffff",
-            fontWeight: "700"
-          }
-        });
-        bounds.extend(partnerCoords);
-        pointCount += 1;
-      }
-
-      if (myCoords && partnerCoords) {
-        distanceLine = new maps.Polyline({
-          path: [myCoords, partnerCoords],
-          geodesic: true,
-          strokeColor: "#e62e65",
-          strokeOpacity: 0.9,
-          strokeWeight: 4
-        });
-        distanceLine.setMap(mapInstance);
-      }
-
-      if (pointCount >= 2) {
-        mapInstance.fitBounds(bounds, 60);
-      } else if (pointCount === 1) {
-        mapInstance.setCenter(myCoords || partnerCoords);
-        mapInstance.setZoom(14);
-      } else {
-        mapInstance.setCenter(defaultCenter);
-        mapInstance.setZoom(11);
-      }
-    })
-    .catch(() => {
-      canvasEl.innerHTML = `
-        <div class="map-fallback-box">
-          <strong>Google Haritalar yüklenemedi</strong>
-          <span><code>www/js/konum.js</code> içindeki <code>GOOGLE_MAPS_API_KEY</code> alanına geçerli bir Google Maps JavaScript API anahtarı girdiğinden ve internet bağlantısının açık olduğundan emin ol.</span>
-        </div>
-      `;
-    });
+function getFillPercent(myCoords, partnerCoords, kmValue) {
+  if (!myCoords || !partnerCoords) return 20;
+  const km = Number(kmValue || 0);
+  if (km <= 0.2) return 100;
+  if (km >= 50) return 25;
+  return Math.max(25, Math.min(95, Math.round(100 - (km / 50) * 70)));
 }
 
 export function renderKonum(contentEl) {
-  mapInstance = null;
-
   const myName = state.myName || "Sen";
   const partnerName = state.partnerName || "Partner";
 
@@ -196,7 +47,17 @@ export function renderKonum(contentEl) {
 
   const myCoords = getCoords(myLoc);
   const partnerCoords = getCoords(partnerLoc);
-  const distanceText = computeDistanceLabel(myCoords, partnerCoords);
+
+  let kmValue = Number(state.distanceKm || 0);
+  if (myCoords && partnerCoords) {
+    kmValue = Number(
+      haversineKm(myCoords.lat, myCoords.lng, partnerCoords.lat, partnerCoords.lng).toFixed(1)
+    );
+    state.distanceKm = kmValue;
+  }
+
+  const distanceText = formatDistance(kmValue);
+  const fillPercent = getFillPercent(myCoords, partnerCoords, kmValue);
 
   const myPlaceText = myLoc?.label || "Henüz paylaşılmadı";
   const myUpdatedText = myLoc?.updatedAt ? `Güncel: ${myLoc.updatedAt}` : "Güncel: Henüz güncellenmedi";
@@ -206,24 +67,43 @@ export function renderKonum(contentEl) {
     ? `Güncel: ${partnerLoc.updatedAt}`
     : "Güncel: Henüz güncellenmedi";
 
+  const statusSummary =
+    myCoords && partnerCoords
+      ? `İki konum da aktif · Koordinat farkı hesaplandı`
+      : myCoords || partnerCoords
+      ? `Bir konum paylaşıldı · Mesafe için diğer konum bekleniyor`
+      : `Konum paylaştığınızda aradaki mesafe burada görünür`;
+
   contentEl.innerHTML = `
     <div class="konum-layout">
-      <div class="map-card">
-        <div class="map-header-row">
-          <div class="label" style="margin:0;">CANLI HARİTA VE MESAFE</div>
-          <span class="map-distance-badge" id="map-distance-badge">Aradaki mesafe: ${distanceText}</span>
+      <div class="radar-hero-card">
+        <div class="radar-top-row">
+          <div class="label" style="margin:0;">MESAFE KÖPRÜSÜ</div>
+          <span class="radar-pill">${distanceText}</span>
         </div>
 
-        <div class="map-participants-line">
-          <strong>${myName}:</strong> ${myPlaceText} · <strong>${partnerName}:</strong> ${partnerPlaceText}
+        <div class="radar-bridge">
+          <div class="radar-person">
+            <div class="radar-avatar">${(myName[0] || "S").toUpperCase()}</div>
+            <div class="radar-person-name">${myName}</div>
+            <div class="radar-person-place">${myPlaceText}</div>
+          </div>
+
+          <div class="radar-track-wrap">
+            <span class="radar-distance-chip">${distanceText}</span>
+            <div class="radar-track">
+              <div class="radar-track-fill" style="width:${fillPercent}%;"></div>
+            </div>
+          </div>
+
+          <div class="radar-person">
+            <div class="radar-avatar partner">${(partnerName[0] || "P").toUpperCase()}</div>
+            <div class="radar-person-name">${partnerName}</div>
+            <div class="radar-person-place">${partnerPlaceText}</div>
+          </div>
         </div>
 
-        <div id="google-map-canvas" class="google-map-canvas"></div>
-
-        <div class="map-actions-row">
-          <span class="map-hint-text">Parmağınla haritada gezinebilir, yakınlaşıp uzaklaşabilirsin.</span>
-          <button type="button" class="tool-btn" id="center-both-btn">İkisini Ortala</button>
-        </div>
+        <div class="radar-sub-status">${statusSummary}</div>
       </div>
 
       <div class="card">
@@ -260,12 +140,6 @@ export function renderKonum(contentEl) {
       </div>
     </div>
   `;
-
-  initOrUpdateGoogleMap(myCoords, partnerCoords, myName, partnerName);
-
-  document.getElementById("center-both-btn")?.addEventListener("click", () => {
-    initOrUpdateGoogleMap(myCoords, partnerCoords, myName, partnerName);
-  });
 
   document.getElementById("save-location-label-btn")?.addEventListener("click", () => {
     const inputEl = document.getElementById("location-label-input");
