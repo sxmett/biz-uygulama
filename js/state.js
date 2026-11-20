@@ -591,21 +591,21 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
   let panX = 0;
   let panY = 0;
 
-  let isPointerDragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-  let dragOriginPanX = 0;
-  let dragOriginPanY = 0;
-  let didDragMove = false;
+  let mouseDragging = false;
+  let mouseMoved = false;
+  let mouseStartX = 0;
+  let mouseStartY = 0;
+  let mouseOriginX = 0;
+  let mouseOriginY = 0;
 
+  let touchMode = "none"; // "none" | "pan" | "pinch"
+  let touchMoved = false;
   let pinchStartDist = 0;
   let pinchStartScale = 1;
-  let touchPanStartX = 0;
-  let touchPanStartY = 0;
-  let touchPanOriginX = 0;
-  let touchPanOriginY = 0;
-  let swipeNavStartX = 0;
-  let swipeNavStartY = 0;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchOriginX = 0;
+  let touchOriginY = 0;
 
   document.getElementById("wa-gallery-lightbox")?.remove();
 
@@ -614,7 +614,7 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
   overlay.style.cssText = `
     position: fixed;
     inset: 0;
-    z-index: 10000;
+    z-index: 99999;
     background: rgba(10, 10, 12, 0.96);
     display: flex;
     flex-direction: column;
@@ -631,16 +631,16 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
       justify-content: space-between;
       gap: 10px;
       padding: 14px 16px;
-      background: rgba(20, 20, 24, 0.75);
+      background: rgba(20, 20, 24, 0.85);
       backdrop-filter: blur(8px);
-      z-index: 3;
+      z-index: 4;
     ">
       <div style="display: flex; align-items: center; gap: 8px;">
         <span id="wa-lb-counter" style="
           color: #fff;
           font-size: 13px;
           font-weight: 600;
-          background: rgba(255,255,255,0.12);
+          background: rgba(255,255,255,0.14);
           padding: 5px 10px;
           border-radius: 999px;
         ">1 / 1</span>
@@ -648,7 +648,7 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
           color: #ffd6e4;
           font-size: 12.5px;
           font-weight: 600;
-          background: rgba(230,46,101,0.28);
+          background: rgba(230,46,101,0.32);
           padding: 5px 10px;
           border-radius: 999px;
         ">100%</span>
@@ -656,16 +656,16 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
 
       <div style="display: flex; align-items: center; gap: 6px;">
         <button type="button" id="wa-lb-out" style="
-          min-width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2);
-          background: rgba(255,255,255,0.1); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer;
+          min-width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.22);
+          background: rgba(255,255,255,0.12); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer;
         ">-</button>
         <button type="button" id="wa-lb-reset" style="
-          height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2);
-          background: rgba(255,255,255,0.1); color: #fff; font-size: 12.5px; font-weight: 700; cursor: pointer;
+          height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.22);
+          background: rgba(255,255,255,0.12); color: #fff; font-size: 12.5px; font-weight: 700; cursor: pointer;
         ">1x</button>
         <button type="button" id="wa-lb-in" style="
-          min-width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2);
-          background: rgba(255,255,255,0.1); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer;
+          min-width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.22);
+          background: rgba(255,255,255,0.12); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer;
         ">+</button>
         <button type="button" id="wa-lb-close" style="
           height: 36px; padding: 0 12px; border-radius: 10px; border: none;
@@ -682,20 +682,21 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
       display: flex;
       align-items: center;
       justify-content: center;
+      touch-action: none;
     ">
       ${
         validItems.length > 1
           ? `
             <button type="button" id="wa-lb-prev" aria-label="Önceki fotoğraf" style="
-              position: absolute; left: 10px; top: 50%; transform: translateY(-50%); z-index: 2;
-              width: 38px; height: 38px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.22);
-              background: rgba(20,20,24,0.65); color: #fff; font-size: 20px; cursor: pointer;
+              position: absolute; left: 10px; top: 50%; transform: translateY(-50%); z-index: 3;
+              width: 40px; height: 40px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25);
+              background: rgba(20,20,24,0.72); color: #fff; font-size: 22px; cursor: pointer;
               display: flex; align-items: center; justify-content: center;
             ">‹</button>
             <button type="button" id="wa-lb-next" aria-label="Sonraki fotoğraf" style="
-              position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 2;
-              width: 38px; height: 38px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.22);
-              background: rgba(20,20,24,0.65); color: #fff; font-size: 20px; cursor: pointer;
+              position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 3;
+              width: 40px; height: 40px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25);
+              background: rgba(20,20,24,0.72); color: #fff; font-size: 22px; cursor: pointer;
               display: flex; align-items: center; justify-content: center;
             ">›</button>
           `
@@ -709,12 +710,12 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
         draggable="false"
         style="
           max-width: 94vw;
-          max-height: 78vh;
+          max-height: 76vh;
           object-fit: contain;
           border-radius: 10px;
           transform-origin: center center;
           will-change: transform;
-          cursor: grab;
+          touch-action: none;
         "
       />
     </div>
@@ -725,8 +726,8 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
       text-align: center;
       color: #f3edf1;
       font-size: 13px;
-      background: rgba(20, 20, 24, 0.75);
-      z-index: 3;
+      background: rgba(20, 20, 24, 0.85);
+      z-index: 4;
     "></div>
   `;
 
@@ -744,18 +745,21 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
       panY = 0;
       return;
     }
-    const maxPanX = Math.max(120, (scale - 1) * (stageEl?.clientWidth || 360) * 0.65);
-    const maxPanY = Math.max(120, (scale - 1) * (stageEl?.clientHeight || 500) * 0.65);
+    const maxPanX = Math.max(180, ((scale - 1) * (stageEl?.clientWidth || 360)) * 0.85);
+    const maxPanY = Math.max(180, ((scale - 1) * (stageEl?.clientHeight || 500)) * 0.85);
     panX = Math.min(maxPanX, Math.max(-maxPanX, panX));
     panY = Math.min(maxPanY, Math.max(-maxPanY, panY));
   };
 
-  const applyTransform = () => {
+  const renderTransform = (customX = panX, customY = panY, customScale = scale) => {
+    if (!imgEl) return;
+    imgEl.style.transform = `translate3d(${customX.toFixed(1)}px, ${customY.toFixed(1)}px, 0) scale(${customScale.toFixed(2)})`;
+    imgEl.style.cursor = mouseDragging ? "grabbing" : scale > 1 ? "grab" : "zoom-in";
+  };
+
+  const commitTransform = () => {
     clampPan();
-    if (imgEl) {
-      imgEl.style.transform = `translate3d(${panX.toFixed(1)}px, ${panY.toFixed(1)}px, 0) scale(${scale.toFixed(2)})`;
-      imgEl.style.cursor = isPointerDragging ? "grabbing" : scale > 1 ? "grab" : "zoom-in";
-    }
+    renderTransform(panX, panY, scale);
     if (zoomEl) {
       zoomEl.textContent = `${Math.round(scale * 100)}%`;
     }
@@ -767,7 +771,7 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
       panX = 0;
       panY = 0;
     }
-    applyTransform();
+    commitTransform();
   };
 
   const loadPhotoAt = (idx) => {
@@ -787,13 +791,13 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
     if (captionEl) {
       captionEl.textContent = item.title || "";
     }
-    applyTransform();
+    commitTransform();
   };
 
   const closeViewer = () => {
     document.removeEventListener("keydown", onKeyDown);
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("mousemove", onMouseMove);
+    window.removeEventListener("mouseup", onMouseUp);
     overlay.remove();
   };
 
@@ -813,82 +817,83 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
     }
   };
 
-  const onPointerMove = (e) => {
-    if (!isPointerDragging) return;
-    const dx = e.clientX - dragStartX;
-    const dy = e.clientY - dragStartY;
+  // PC: Fare basılı tutarak sağa/sola/yukarı/aşağı kaydırma
+  const onMouseMove = (e) => {
+    if (!mouseDragging) return;
+    const dx = e.clientX - mouseStartX;
+    const dy = e.clientY - mouseStartY;
     if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-      didDragMove = true;
+      mouseMoved = true;
     }
 
     if (scale > 1) {
-      panX = dragOriginPanX + dx;
-      panY = dragOriginPanY + dy;
-      applyTransform();
-    } else {
-      panX = dragOriginPanX + dx * 0.45;
-      if (imgEl) {
-        imgEl.style.transform = `translate3d(${panX.toFixed(1)}px, 0px, 0) scale(1)`;
-      }
+      panX = mouseOriginX + dx;
+      panY = mouseOriginY + dy;
+      commitTransform();
+    } else if (validItems.length > 1) {
+      renderTransform(mouseOriginX + dx * 0.45, 0, 1);
     }
   };
 
-  const onPointerUp = (e) => {
-    if (!isPointerDragging) return;
-    isPointerDragging = false;
-    const dx = e.clientX - dragStartX;
+  const onMouseUp = (e) => {
+    if (!mouseDragging) return;
+    mouseDragging = false;
+    const dx = e.clientX - mouseStartX;
 
     if (scale <= 1) {
       panX = 0;
-      applyTransform();
+      panY = 0;
+      commitTransform();
       if (validItems.length > 1 && Math.abs(dx) > 65) {
         if (dx < 0) loadPhotoAt(currentIndex + 1);
         else loadPhotoAt(currentIndex - 1);
       }
+    } else {
+      commitTransform();
     }
-    applyTransform();
   };
 
-  imgEl?.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "touch") return;
+  imgEl?.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
     e.preventDefault();
-    isPointerDragging = true;
-    didDragMove = false;
-    dragStartX = e.clientX;
-    dragStartY = e.clientY;
-    dragOriginPanX = panX;
-    dragOriginPanY = panY;
-    applyTransform();
+    mouseDragging = true;
+    mouseMoved = false;
+    mouseStartX = e.clientX;
+    mouseStartY = e.clientY;
+    mouseOriginX = panX;
+    mouseOriginY = panY;
+    renderTransform(panX, panY, scale);
   });
 
   imgEl?.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (didDragMove) {
-      didDragMove = false;
+    if (mouseMoved) {
+      mouseMoved = false;
       return;
     }
     setZoom(scale > 1 ? 1 : 2);
   });
 
-  const getTouchDistance = (touches) => {
-    const t0 = touches[0];
-    const t1 = touches[1];
-    return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
-  };
+  // Mobil: 2 parmak pinch-to-zoom + 1 parmak sağ/sol/yukarı/aşağı kaydırma
+  const getTouchesDist = (touches) =>
+    Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY);
 
   stageEl?.addEventListener(
     "touchstart",
     (e) => {
       if (e.touches.length === 2) {
-        pinchStartDist = getTouchDistance(e.touches);
+        e.preventDefault();
+        touchMode = "pinch";
+        touchMoved = true;
+        pinchStartDist = getTouchesDist(e.touches);
         pinchStartScale = scale;
       } else if (e.touches.length === 1) {
-        touchPanStartX = e.touches[0].clientX;
-        touchPanStartY = e.touches[0].clientY;
-        touchPanOriginX = panX;
-        touchPanOriginY = panY;
-        swipeNavStartX = e.touches[0].clientX;
-        swipeNavStartY = e.touches[0].clientY;
+        touchMode = "pan";
+        touchMoved = false;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchOriginX = panX;
+        touchOriginY = panY;
       }
     },
     { passive: false }
@@ -897,30 +902,30 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
   stageEl?.addEventListener(
     "touchmove",
     (e) => {
-      if (e.touches.length === 2 && pinchStartDist > 0) {
+      if (touchMode === "pinch" && e.touches.length === 2 && pinchStartDist > 0) {
         e.preventDefault();
-        const dist = getTouchDistance(e.touches);
-        const nextScale = pinchStartScale * (dist / pinchStartDist);
-        scale = Math.min(4, Math.max(1, Number(nextScale.toFixed(2))));
+        const dist = getTouchesDist(e.touches);
+        scale = Math.min(4, Math.max(1, Number((pinchStartScale * (dist / pinchStartDist)).toFixed(2))));
         if (scale === 1) {
           panX = 0;
           panY = 0;
         }
-        applyTransform();
-      } else if (e.touches.length === 1) {
-        const dx = e.touches[0].clientX - touchPanStartX;
-        const dy = e.touches[0].clientY - touchPanStartY;
+        commitTransform();
+      } else if (touchMode === "pan" && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - touchStartX;
+        const dy = e.touches[0].clientY - touchStartY;
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+          touchMoved = true;
+        }
 
         if (scale > 1) {
           e.preventDefault();
-          panX = touchPanOriginX + dx;
-          panY = touchPanOriginY + dy;
-          applyTransform();
+          panX = touchOriginX + dx;
+          panY = touchOriginY + dy;
+          commitTransform();
         } else if (validItems.length > 1 && Math.abs(dx) > Math.abs(dy)) {
-          panX = dx * 0.45;
-          if (imgEl) {
-            imgEl.style.transform = `translate3d(${panX.toFixed(1)}px, 0px, 0) scale(1)`;
-          }
+          e.preventDefault();
+          renderTransform(dx * 0.45, 0, 1);
         }
       }
     },
@@ -928,35 +933,46 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
   );
 
   stageEl?.addEventListener("touchend", (e) => {
-    if (e.touches.length < 2) {
-      pinchStartDist = 0;
+    if (e.touches.length === 2) {
+      pinchStartDist = getTouchesDist(e.touches);
+      pinchStartScale = scale;
+      touchMode = "pinch";
+      return;
     }
-    if (scale <= 1 && e.changedTouches.length > 0) {
+
+    if (touchMode === "pan" && scale <= 1 && e.changedTouches.length > 0) {
       const endX = e.changedTouches[0].clientX;
       const endY = e.changedTouches[0].clientY;
-      const diffX = endX - swipeNavStartX;
-      const diffY = endY - swipeNavStartY;
+      const diffX = endX - touchStartX;
+      const diffY = endY - touchStartY;
       panX = 0;
-      applyTransform();
-      if (validItems.length > 1 && Math.abs(diffX) > 65 && Math.abs(diffX) > Math.abs(diffY)) {
+      panY = 0;
+      commitTransform();
+
+      if (validItems.length > 1 && Math.abs(diffX) > 60 && Math.abs(diffX) > Math.abs(diffY)) {
         if (diffX < 0) loadPhotoAt(currentIndex + 1);
         else loadPhotoAt(currentIndex - 1);
       }
     }
+
+    if (e.touches.length === 0) {
+      touchMode = "none";
+      pinchStartDist = 0;
+    }
   });
 
+  // PC: Fare tekerleği ile yakınlaştırma / uzaklaştırma
   stageEl?.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      const delta = e.deltaY < 0 ? 0.25 : -0.25;
-      setZoom(scale + delta);
+      setZoom(scale + (e.deltaY < 0 ? 0.25 : -0.25));
     },
     { passive: false }
   );
 
   stageEl?.addEventListener("click", (e) => {
-    if (e.target === stageEl && !didDragMove) {
+    if (e.target === stageEl && !mouseMoved && !touchMoved) {
       closeViewer();
     }
   });
@@ -989,8 +1005,8 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
   document.getElementById("wa-lb-close")?.addEventListener("click", closeViewer);
 
   document.addEventListener("keydown", onKeyDown);
-  window.addEventListener("pointermove", onPointerMove);
-  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("mouseup", onMouseUp);
 
   loadPhotoAt(currentIndex);
 }
