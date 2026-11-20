@@ -1,5 +1,28 @@
 import { state, saveState, getDeviceRole, nowTime } from "./state.js";
 
+const LOCAL_CACHE_KEY = "biz_konum_cache_v1";
+
+function readCachedLocations() {
+  try {
+    const raw = localStorage.getItem(LOCAL_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCachedLocation(role, record) {
+  try {
+    const current = readCachedLocations();
+    current[role] = record;
+    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(current));
+  } catch {
+    // Depolama hatası yoksayılır
+  }
+}
+
 function calculateDistanceKm(a, b) {
   if (!a || !b) return null;
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -39,35 +62,64 @@ function extractCoords(entry) {
   return { lat, lng };
 }
 
+function isValidLocationRecord(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  const hasCoords = Boolean(extractCoords(entry));
+  const hasAddress = Boolean(String(entry.address || entry.label || "").trim());
+  return hasCoords || hasAddress;
+}
+
+function pickNewestRecord(...candidates) {
+  const valid = candidates.filter(isValidLocationRecord);
+  if (valid.length === 0) return null;
+  valid.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+  return valid[0];
+}
+
 function getPairLocations() {
   const role = getDeviceRole() || "userA";
   const partnerRole = role === "userA" ? "userB" : "userA";
+  const cache = readCachedLocations();
 
-  const mine =
-    state.myLocation ||
-    state.locations?.[role] ||
-    (role === "userA" ? state.userALocation : state.userBLocation) ||
-    null;
+  const mine = pickNewestRecord(
+    state.myLocation,
+    state.locations?.[role],
+    state.sharedLocations?.[role],
+    role === "userA" ? state.userALocation : state.userBLocation,
+    cache[role]
+  );
 
-  const partner =
-    state.partnerLocation ||
-    state.locations?.[partnerRole] ||
-    (role === "userA" ? state.userBLocation : state.userALocation) ||
-    null;
+  const partner = pickNewestRecord(
+    state.partnerLocation,
+    state.locations?.[partnerRole],
+    state.sharedLocations?.[partnerRole],
+    role === "userA" ? state.userBLocation : state.userALocation,
+    cache[partnerRole]
+  );
 
-  return { role, mine, partner };
+  return { role, partnerRole, mine, partner };
 }
 
 function saveMineLocation(role, nextData) {
   state.myLocation = nextData;
-  if (state.locations && typeof state.locations === "object") {
-    state.locations[role] = nextData;
+
+  if (!state.locations || typeof state.locations !== "object") {
+    state.locations = {};
   }
+  state.locations[role] = nextData;
+
+  if (!state.sharedLocations || typeof state.sharedLocations !== "object") {
+    state.sharedLocations = {};
+  }
+  state.sharedLocations[role] = nextData;
+
   if (role === "userA") {
     state.userALocation = nextData;
   } else {
     state.userBLocation = nextData;
   }
+
+  writeCachedLocation(role, nextData);
 }
 
 async function resolveAddressFromCoords(lat, lng) {
@@ -437,6 +489,7 @@ export function renderKonum(containerEl, notice = null) {
         label: finalAddress,
         lat,
         lng,
+        ts: Date.now(),
         updatedAt: nowTime()
       };
 
