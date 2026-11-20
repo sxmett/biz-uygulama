@@ -63,7 +63,7 @@ function formatDistance(kmValue) {
 }
 
 function getFillPercent(myCoords, partnerCoords, kmValue) {
-  if (!myCoords || !partnerCoords) return 22;
+  if (!myCoords || !partnerCoords) return 20;
   const km = Number(kmValue || 0);
   if (km <= 0.2) return 100;
   if (km >= 50) return 25;
@@ -72,18 +72,20 @@ function getFillPercent(myCoords, partnerCoords, kmValue) {
 
 function buildMapsUrl(coords, labelText) {
   if (!coords) return "#";
-  const q = encodeURIComponent(labelText ? `${coords.lat},${coords.lng} (${labelText})` : `${coords.lat},${coords.lng}`);
+  const q = encodeURIComponent(
+    labelText ? `${coords.lat},${coords.lng} (${labelText})` : `${coords.lat},${coords.lng}`
+  );
   return `https://www.google.com/maps/search/?api=1&query=${q}`;
 }
 
-async function fetchShortCityDistrict(lat, lng) {
+async function fetchShortAddress(lat, lng) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const timer = setTimeout(() => controller.abort(), 5000);
 
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
       lat
-    )}&lon=${encodeURIComponent(lng)}&zoom=12&addressdetails=1&accept-language=tr`;
+    )}&lon=${encodeURIComponent(lng)}&zoom=14&addressdetails=1&accept-language=tr`;
 
     const res = await fetch(url, {
       signal: controller.signal,
@@ -94,32 +96,42 @@ async function fetchShortCityDistrict(lat, lng) {
     const data = await res.json();
     const addr = data?.address || {};
 
+    const neighbourhood =
+      addr.neighbourhood ||
+      addr.suburb ||
+      addr.quarter ||
+      "";
     const district =
       addr.county ||
       addr.town ||
       addr.district ||
       addr.city_district ||
-      addr.suburb ||
       "";
-
     const city =
       addr.province ||
       addr.state ||
       addr.city ||
-      addr.region ||
       "";
 
-    const cleanDistrict = String(district).trim();
-    const cleanCity = String(city).trim();
+    const parts = [neighbourhood, district, city]
+      .map((s) => String(s || "").trim())
+      .filter(Boolean);
 
-    if (cleanDistrict && cleanCity && cleanDistrict.toLowerCase() !== cleanCity.toLowerCase()) {
-      return `${cleanDistrict}, ${cleanCity}`;
+    const uniqueParts = [];
+    for (const item of parts) {
+      if (!uniqueParts.some((u) => u.toLowerCase() === item.toLowerCase())) {
+        uniqueParts.push(item);
+      }
     }
-    return cleanCity || cleanDistrict || null;
+
+    if (uniqueParts.length >= 2) {
+      return uniqueParts.slice(-2).join(", ");
+    }
+    return uniqueParts[0] || null;
   } catch {
     return null;
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(timer);
   }
 }
 
@@ -205,7 +217,7 @@ async function acquireDevicePosition() {
       try {
         await withTimeout(capGeo.requestPermissions(), 6000);
       } catch {
-        // İzin durumu getCurrentPosition'da netleşecek
+        // İzin kontrolü devam edecek
       }
     }
     try {
@@ -258,7 +270,7 @@ async function acquireDevicePosition() {
 function explainGeoError(err) {
   const code = err?.code;
   if (code === 1) {
-    return "Konum izni kapalı. Telefon Ayarları -> Uygulamalar -> Konum iznini 'İzin ver' yap.";
+    return "Konum izni kapalı. Uygulama izinlerinden Konum iznini açıp tekrar dene.";
   }
   if (code === 2) {
     return "Konum sinyali alınamadı. Telefonun Konum (GPS) servisinin açık olduğundan emin ol.";
@@ -269,7 +281,7 @@ function explainGeoError(err) {
   return err?.message || "Konum alınamadı. Konum iznini ve GPS'i kontrol et.";
 }
 
-export function renderKonum(contentEl) {
+export function renderKonum(contentEl, feedback = null) {
   const myName = state.myName || "Sen";
   const partnerName = state.partnerName || "Sevgilim";
 
@@ -291,140 +303,105 @@ export function renderKonum(contentEl) {
 
   const myPlaceText =
     myLoc?.label || (myCoords ? `${myCoords.lat}, ${myCoords.lng}` : "Henüz paylaşılmadı");
-  const myUpdatedText = myLoc?.updatedAt ? `Güncel: ${myLoc.updatedAt}` : "Güncel: Henüz güncellenmedi";
+  const myUpdatedText = myLoc?.updatedAt ? `Güncel: ${myLoc.updatedAt}` : "Henüz güncellenmedi";
 
   const partnerPlaceText =
-    partnerLoc?.label || (partnerCoords ? `${partnerCoords.lat}, ${partnerCoords.lng}` : "Henüz paylaşılmadı");
+    partnerLoc?.label ||
+    (partnerCoords ? `${partnerCoords.lat}, ${partnerCoords.lng}` : "Henüz paylaşılmadı");
   const partnerUpdatedText = partnerLoc?.updatedAt
     ? `Güncel: ${partnerLoc.updatedAt}`
-    : "Güncel: Henüz güncellenmedi";
+    : "Henüz güncellenmedi";
 
   const myMapUrl = buildMapsUrl(myCoords, myPlaceText);
   const partnerMapUrl = buildMapsUrl(partnerCoords, partnerPlaceText);
 
-  const statusSummary =
+  const statusNoteText =
     myCoords && partnerCoords
-      ? `İki konum da güncel · Aradaki mesafe: ${distanceText}`
+      ? `Aradaki mesafe: ${distanceText}`
       : myCoords
-      ? `${myName} konumunu paylaştı (${myPlaceText}) · ${partnerName} bekleniyor`
-      : partnerCoords
-      ? `${partnerName} konumunu paylaştı (${partnerPlaceText}) · Sıra sende`
-      : `Konumunu paylaştığında mesafe köprüsü burada canlanır`;
+      ? `${partnerName} konumu bekleniyor`
+      : `Konumunu alınca mesafe hesaplanır`;
 
   contentEl.innerHTML = `
     <div class="konum-layout">
-      <div class="radar-hero-card">
-        <div class="radar-top-row">
-          <div class="label" style="margin:0;">MESAFE KÖPRÜSÜ</div>
-          <span class="radar-pill">${distanceText}</span>
+      <div class="bridge-card">
+        <div class="bridge-top">
+          <div class="label" style="margin:0;">KONUM & MESAFE</div>
+          <span class="bridge-distance-badge">${distanceText}</span>
         </div>
 
-        <div class="radar-bridge">
-          <div class="radar-person">
-            <div class="radar-avatar">${(myName[0] || "S").toUpperCase()}</div>
-            <div class="radar-person-name">${myName}</div>
-            <div class="radar-person-place">${myPlaceText}</div>
+        <div class="bridge-bar-wrap">
+          <div class="bridge-track">
+            <div class="bridge-track-fill" style="width:${fillPercent}%;"></div>
           </div>
-
-          <div class="radar-track-wrap">
-            <span class="radar-distance-chip">${distanceText}</span>
-            <div class="radar-track">
-              <div class="radar-track-fill" style="width:${fillPercent}%;"></div>
-            </div>
-          </div>
-
-          <div class="radar-person">
-            <div class="radar-avatar partner">${(partnerName[0] || "P").toUpperCase()}</div>
-            <div class="radar-person-name">${partnerName}</div>
-            <div class="radar-person-place">${partnerPlaceText}</div>
+          <div class="bridge-meta-row">
+            <span>${myName} ↔ ${partnerName}</span>
+            <span>${statusNoteText}</span>
           </div>
         </div>
 
-        <div class="radar-sub-status">${statusSummary}</div>
-      </div>
-
-      <div class="card loc-person-card mine">
-        <div class="row-between">
-          <div class="label">SENİN KONUMUN · ${myName.toUpperCase()}</div>
-          <span class="badge">${myUpdatedText}</span>
+        <div class="person-row-box mine">
+          <div class="person-row-head">
+            <span class="person-tag">${myName} (Sen)</span>
+            <span class="person-time">${myUpdatedText}</span>
+          </div>
+          <div class="person-address">${myPlaceText}</div>
+          <div class="person-coords">
+            ${myCoords ? `${myCoords.lat}, ${myCoords.lng}` : "Koordinat yok"}
+          </div>
+          <div class="person-actions">
+            <button type="button" class="send-btn" id="get-my-location-btn">Konumumu Al</button>
+            <a
+              href="${myMapUrl}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="map-open-btn ${myCoords ? "" : "disabled"}"
+            >Haritada Aç</a>
+            <span id="location-status-note" class="muted-note"></span>
+          </div>
         </div>
-        <h3 style="margin:8px 0 4px;">${myPlaceText}</h3>
+
+        <div class="person-row-box partner">
+          <div class="person-row-head">
+            <span class="person-tag">${partnerName}</span>
+            <span class="person-time">${partnerUpdatedText}</span>
+          </div>
+          <div class="person-address">${partnerPlaceText}</div>
+          <div class="person-coords">
+            ${partnerCoords ? `${partnerCoords.lat}, ${partnerCoords.lng}` : "Koordinat yok"}
+          </div>
+          <div class="person-actions">
+            <a
+              href="${partnerMapUrl}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="map-open-btn ${partnerCoords ? "" : "disabled"}"
+            >Haritada Aç</a>
+          </div>
+        </div>
+
         ${
-          myCoords
-            ? `<div class="loc-coords-pill">Enlem: ${myCoords.lat} · Boylam: ${myCoords.lng}</div>`
-            : `<div class="loc-coords-pill">Henüz konum çekilmedi</div>`
+          feedback?.type === "ok"
+            ? `<div class="loc-feedback-ok">${feedback.text}</div>`
+            : feedback?.type === "err"
+            ? `<div class="loc-feedback-err">${feedback.text}</div>`
+            : ""
         }
-
-        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;">
-          <button type="button" class="send-btn" id="get-my-location-btn">Konumumu Al</button>
-          <a
-            href="${myMapUrl}"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="loc-map-link-btn ${myCoords ? "" : "disabled"}"
-          >Haritada Aç</a>
-          <span id="location-status-note" class="muted-note"></span>
-        </div>
-
-        <div id="location-success-box" class="loc-success-box" style="display:none;"></div>
-        <div id="location-error-box" class="loc-error-box" style="display:none;"></div>
-      </div>
-
-      <div class="card loc-person-card partner">
-        <div class="row-between">
-          <div class="label">SEVGİLİNİN KONUMU · ${partnerName.toUpperCase()}</div>
-          <span class="badge">${partnerUpdatedText}</span>
-        </div>
-        <h3 style="margin:8px 0 4px;">${partnerPlaceText}</h3>
-        ${
-          partnerCoords
-            ? `<div class="loc-coords-pill">Enlem: ${partnerCoords.lat} · Boylam: ${partnerCoords.lng}</div>`
-            : `<div class="loc-coords-pill">Henüz konum paylaşılmadı</div>`
-        }
-        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
-          <a
-            href="${partnerMapUrl}"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="loc-map-link-btn ${partnerCoords ? "" : "disabled"}"
-          >Haritada Aç</a>
-          <span class="muted-note">Aradaki mesafe: ${distanceText}</span>
-        </div>
       </div>
     </div>
   `;
-
-  const showSuccess = (msg) => {
-    const okBox = document.getElementById("location-success-box");
-    const errBox = document.getElementById("location-error-box");
-    if (errBox) errBox.style.display = "none";
-    if (okBox) {
-      okBox.style.display = "block";
-      okBox.textContent = msg;
-    }
-  };
-
-  const showError = (msg) => {
-    const okBox = document.getElementById("location-success-box");
-    const errBox = document.getElementById("location-error-box");
-    if (okBox) okBox.style.display = "none";
-    if (errBox) {
-      errBox.style.display = "block";
-      errBox.textContent = msg;
-    }
-  };
 
   document.getElementById("get-my-location-btn")?.addEventListener("click", async () => {
     const btnEl = document.getElementById("get-my-location-btn");
     const statusNote = document.getElementById("location-status-note");
 
-    if (statusNote) statusNote.textContent = "Konum ve il/ilçe alınıyor...";
+    if (statusNote) statusNote.textContent = "Konum alınıyor...";
     if (btnEl) btnEl.disabled = true;
 
     try {
       const { lat, lng } = await acquireDevicePosition();
-      const shortPlace = await fetchShortCityDistrict(lat, lng);
-      const label = shortPlace || `${lat}, ${lng}`;
+      const shortAddr = await fetchShortAddress(lat, lng);
+      const label = shortAddr || `${lat}, ${lng}`;
 
       const updated = {
         ...(myLoc || {}),
@@ -446,12 +423,9 @@ export function renderKonum(contentEl) {
       }
 
       saveState({ pushCloud: true });
-      renderKonum(contentEl);
-      showSuccess(`Konum güncellendi: ${label}`);
+      renderKonum(contentEl, { type: "ok", text: `Güncellendi: ${label}` });
     } catch (err) {
-      if (btnEl) btnEl.disabled = false;
-      if (statusNote) statusNote.textContent = "";
-      showError(explainGeoError(err));
+      renderKonum(contentEl, { type: "err", text: explainGeoError(err) });
     }
   });
 }
