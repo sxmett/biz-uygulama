@@ -1,206 +1,116 @@
-import { state, saveState } from "./state.js";
+import { state, showToast, saveState } from "./state.js";
 
-let activeAnilarLightboxSrc = null;
-
-function openAnilarLightbox(src) {
+function openMemoryLightbox(src) {
   if (!src) return;
-  activeAnilarLightboxSrc = src;
-
-  document.getElementById("anilar-lightbox-overlay")?.remove();
-
-  let scale = 1;
+  document.getElementById("memory-lightbox-overlay")?.remove();
 
   const overlay = document.createElement("div");
-  overlay.id = "anilar-lightbox-overlay";
-  overlay.className = "anilar-lightbox";
+  overlay.id = "memory-lightbox-overlay";
+  overlay.className = "photo-lightbox";
   overlay.innerHTML = `
-    <div class="anilar-lightbox-bar">
-      <span class="status-pill" id="anilar-zoom-pill">100%</span>
-      <div class="anilar-lightbox-controls">
-        <button type="button" class="anilar-lightbox-btn" id="anilar-zoom-out">-</button>
-        <button type="button" class="anilar-lightbox-btn" id="anilar-zoom-reset">1x</button>
-        <button type="button" class="anilar-lightbox-btn" id="anilar-zoom-in">+</button>
-        <button type="button" class="anilar-lightbox-btn" id="anilar-close-lightbox">Kapat</button>
+    <div class="lightbox-bar">
+      <span class="status-pill">Anı Fotoğrafı</span>
+      <div class="lightbox-controls">
+        <button type="button" class="lightbox-btn" id="close-memory-lightbox">Kapat</button>
       </div>
     </div>
-    <div class="anilar-lightbox-stage" id="anilar-lightbox-stage">
-      <img src="${src}" alt="Anı fotoğrafı" class="anilar-lightbox-img" id="anilar-lightbox-img" />
+    <div class="lightbox-stage" id="memory-lightbox-stage">
+      <img src="${src}" alt="Anı fotoğrafı" class="lightbox-img" />
     </div>
   `;
 
   document.body.appendChild(overlay);
 
-  const img = document.getElementById("anilar-lightbox-img");
-  const stage = document.getElementById("anilar-lightbox-stage");
-  const pill = document.getElementById("anilar-zoom-pill");
-
-  const applyScale = (nextScale) => {
-    scale = Math.min(4, Math.max(1, Number(nextScale.toFixed(2))));
-    img.style.transform = `scale(${scale})`;
-    img.classList.toggle("zoomed", scale > 1);
-    pill.textContent = `${Math.round(scale * 100)}%`;
-  };
-
-  const closeLightbox = () => {
-    activeAnilarLightboxSrc = null;
-    document.removeEventListener("keydown", onKeyDown);
-    overlay.remove();
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === "Escape") closeLightbox();
-  };
-
-  document.addEventListener("keydown", onKeyDown);
-
-  document.getElementById("anilar-zoom-in").addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(scale + 0.5);
+  const close = () => overlay.remove();
+  document.getElementById("close-memory-lightbox")?.addEventListener("click", close);
+  document.getElementById("memory-lightbox-stage")?.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) close();
   });
-
-  document.getElementById("anilar-zoom-out").addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(scale - 0.5);
-  });
-
-  document.getElementById("anilar-zoom-reset").addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(1);
-  });
-
-  document.getElementById("anilar-close-lightbox").addEventListener("click", closeLightbox);
-
-  stage.addEventListener("click", (e) => {
-    if (e.target === stage) closeLightbox();
-  });
-
-  img.addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyScale(scale > 1 ? 1 : 2);
-  });
-
-  stage.addEventListener(
-    "wheel",
-    (e) => {
-      e.preventDefault();
-      applyScale(scale + (e.deltaY < 0 ? 0.25 : -0.25));
-    },
-    { passive: false }
-  );
 }
 
 export function renderAnilar(contentEl) {
-  const prevTitle = document.getElementById("mem-title")?.value || "";
-  const prevNote = document.getElementById("mem-note")?.value || "";
-
   const photoPreviewHtml = state.pendingMemoryPhoto
     ? `
       <div class="preview-box">
         <div style="display:flex;align-items:center;gap:10px;">
           <img src="${state.pendingMemoryPhoto}" alt="Anı önizleme" class="preview-thumb" />
-          <span class="muted-note">Anı fotoğrafı hazır</span>
+          <span class="muted-note">Fotoğraf anıya eklenecek</span>
         </div>
-        <button type="button" class="tool-btn" id="clear-mem-photo">Kaldır</button>
+        <button type="button" class="tool-btn" id="clear-memory-photo-btn">Kaldır</button>
       </div>
     `
     : "";
 
   const memoriesHtml =
-    state.memories.length > 0
+    Array.isArray(state.memories) && state.memories.length > 0
       ? state.memories
-          .map((m) => {
-            const isConfirming = state.confirmDeleteId === m.id;
-            const confirmBoxHtml = isConfirming
-              ? `
-                <div class="confirm-box">
-                  <span>Bu anıyı silmek istiyor musun?</span>
-                  <div class="confirm-actions">
-                    <button type="button" class="call-btn danger" data-confirm-del="${m.id}">Evet, Sil</button>
-                    <button type="button" class="tool-btn" data-cancel-del>İptal</button>
-                  </div>
-                </div>
-              `
+          .map((item) => {
+            const isConfirming = state.confirmDeleteId === item.id;
+            const photoHtml = item.photo
+              ? `<img src="${item.photo}" alt="${item.title}" class="memory-photo" data-open-memory-photo="${item.photo}" />`
               : "";
 
+            const actionHtml = isConfirming
+              ? `
+                <div class="confirm-row">
+                  <span class="confirm-text">Bu anıyı silmek istediğine emin misin?</span>
+                  <button type="button" class="tool-btn" data-cancel-delete="${item.id}">İptal</button>
+                  <button type="button" class="danger-btn" data-confirm-delete="${item.id}">Evet, Sil</button>
+                </div>
+              `
+              : `<button type="button" class="delete-memory-btn" data-ask-delete="${item.id}">Sil</button>`;
+
             return `
-              <article class="card memory-card">
+              <div class="memory-card" data-memory-id="${item.id}">
                 <div class="memory-top">
-                  <div class="memory-title">${m.title}</div>
-                  <span class="status-pill">${m.date}</span>
+                  <strong>${item.title}</strong>
+                  <span class="memory-date">${item.date}</span>
                 </div>
-                ${
-                  m.photo
-                    ? `<img src="${m.photo}" alt="${m.title}" class="memory-photo" data-open-memory-photo="${m.photo}" />`
-                    : ""
-                }
-                <p class="memory-note">${m.note}</p>
+                ${photoHtml}
+                <p class="memory-note">${item.note}</p>
                 <div class="memory-footer">
-                  <span class="memory-author">Ekleyen: ${m.author || state.myName}</span>
-                  <button type="button" class="delete-btn" data-ask-del="${m.id}">Sil</button>
+                  <span class="memory-author">Ekleyen: ${item.author || state.myName || "Sen"}</span>
+                  ${actionHtml}
                 </div>
-                ${confirmBoxHtml}
-              </article>
+              </div>
             `;
           })
           .join("")
       : `
-        <div class="card empty-memories-card">
-          <strong>Henüz kayıtlı anı yok</strong>
-          <p class="muted-note">İlk anını yukarıdan ekleyerek burayı doldurabilirsin.</p>
+        <div class="card" style="text-align:center;">
+          <div class="label" style="margin-bottom:6px;">Anı Defteri Boş</div>
+          <strong>Henüz anı eklenmemiş</strong>
+          <p class="muted-note" style="margin-top:6px;">İlk özel anını yukarıdaki alandan ekleyerek burada saklayabilirsin.</p>
         </div>
       `;
 
   contentEl.innerHTML = `
-    <div class="card">
-      <div class="loc-card-top">
-        <div class="label" style="margin:0;">Yeni Anı</div>
-        <span class="status-pill">${state.memories.length} Anı</span>
-      </div>
+    <div class="memories-layout">
+      <div class="card">
+        <div class="label">Yeni Anı Ekle</div>
+        <div class="memory-form">
+          <input type="text" id="mem-title" class="msg-input plain-input" placeholder="Anı başlığı (Örn: İlk buluşma)" />
+          <input type="text" id="mem-date" class="msg-input plain-input" placeholder="Tarih (Örn: 15 Haziran)" />
+          <textarea id="mem-note" class="msg-input plain-input memory-textarea" placeholder="Bu anı hakkında kısa bir not yaz..."></textarea>
 
-      <div class="form-stack">
-        <input
-          type="text"
-          id="mem-title"
-          class="msg-input plain-input"
-          placeholder="Başlık (Örn: Gün batımı yürüyüşü)"
-        />
-        <textarea
-          id="mem-note"
-          class="msg-input mem-textarea"
-          placeholder="Bu anı neden özeldi? Birkaç cümleyle yaz..."
-        ></textarea>
+          <div class="memory-form-actions">
+            <label class="tool-btn" style="cursor:pointer;">
+              Fotoğraf Ekle
+              <input type="file" id="mem-photo-input" accept="image/*" hidden />
+            </label>
+            <button type="button" class="send-btn" id="add-memory-btn">Anıyı Kaydet</button>
+          </div>
 
-        ${photoPreviewHtml}
-
-        <div class="mem-form-footer">
-          <label class="tool-btn" style="cursor:pointer;">
-            Fotoğraf Ekle
-            <input type="file" id="mem-photo-input" accept="image/*" hidden />
-          </label>
-          <span class="muted-note">Başlık ve not zorunlu</span>
+          ${photoPreviewHtml}
+          <div id="memory-feedback"></div>
         </div>
-
-        <button type="button" class="primary-btn" id="add-mem-btn">Anıyı Kaydet</button>
       </div>
-    </div>
 
-    ${memoriesHtml}
+      ${memoriesHtml}
+    </div>
   `;
 
-  if (activeAnilarLightboxSrc) {
-    openAnilarLightbox(activeAnilarLightboxSrc);
-  }
-
-  document.getElementById("mem-title").value = prevTitle;
-  document.getElementById("mem-note").value = prevNote;
-
-  document.querySelectorAll("[data-open-memory-photo]").forEach((photoEl) => {
-    photoEl.addEventListener("click", () => {
-      openAnilarLightbox(photoEl.dataset.openMemoryPhoto);
-    });
-  });
-
-  document.getElementById("mem-photo-input").addEventListener("change", (e) => {
+  document.getElementById("mem-photo-input")?.addEventListener("change", (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -211,59 +121,74 @@ export function renderAnilar(contentEl) {
     reader.readAsDataURL(file);
   });
 
-  const clearMemPhoto = document.getElementById("clear-mem-photo");
-  if (clearMemPhoto) {
-    clearMemPhoto.addEventListener("click", () => {
-      state.pendingMemoryPhoto = null;
-      renderAnilar(contentEl);
-    });
-  }
+  document.getElementById("clear-memory-photo-btn")?.addEventListener("click", () => {
+    state.pendingMemoryPhoto = null;
+    renderAnilar(contentEl);
+  });
 
-  document.getElementById("add-mem-btn").addEventListener("click", () => {
-    const titleInput = document.getElementById("mem-title");
-    const noteInput = document.getElementById("mem-note");
-    const title = titleInput.value.trim();
-    const note = noteInput.value.trim();
-    if (!title || !note) return;
+  document.getElementById("add-memory-btn")?.addEventListener("click", () => {
+    const titleEl = document.getElementById("mem-title");
+    const dateEl = document.getElementById("mem-date");
+    const noteEl = document.getElementById("mem-note");
+
+    const title = (titleEl?.value || "").trim();
+    const date = (dateEl?.value || "").trim() || new Date().toLocaleDateString("tr-TR", {
+      day: "numeric",
+      month: "long"
+    });
+    const note = (noteEl?.value || "").trim();
+
+    if (!title) {
+      titleEl?.focus();
+      showToast("memory-feedback", "Lütfen anı başlığı gir.");
+      return;
+    }
 
     state.memories.unshift({
-      id: Date.now(),
+      id: Date.now() + Math.floor(Math.random() * 100),
       title,
-      date: new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long" }),
-      author: state.myName,
-      photo: state.pendingMemoryPhoto,
-      note
+      date,
+      author: state.myName || "Sen",
+      photo: state.pendingMemoryPhoto || null,
+      note: note || "Özel bir an."
     });
 
     state.pendingMemoryPhoto = null;
     state.confirmDeleteId = null;
-    titleInput.value = "";
-    noteInput.value = "";
     saveState({ pushCloud: true });
     renderAnilar(contentEl);
+    showToast("memory-feedback", "Yeni anı kaydedildi.");
   });
 
-  document.querySelectorAll("[data-ask-del]").forEach((askBtn) => {
-    askBtn.addEventListener("click", () => {
-      state.confirmDeleteId = Number(askBtn.dataset.askDel);
+  document.querySelectorAll("[data-open-memory-photo]").forEach((imgEl) => {
+    imgEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openMemoryLightbox(imgEl.dataset.openMemoryPhoto);
+    });
+  });
+
+  document.querySelectorAll("[data-ask-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.confirmDeleteId = Number(btn.dataset.askDelete);
       renderAnilar(contentEl);
     });
   });
 
-  document.querySelectorAll("[data-confirm-del]").forEach((confBtn) => {
-    confBtn.addEventListener("click", () => {
-      const id = Number(confBtn.dataset.confirmDel);
-      state.memories = state.memories.filter((m) => m.id !== id);
+  document.querySelectorAll("[data-cancel-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.confirmDeleteId = null;
+      renderAnilar(contentEl);
+    });
+  });
+
+  document.querySelectorAll("[data-confirm-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = Number(btn.dataset.confirmDelete);
+      state.memories = state.memories.filter((m) => m.id !== targetId);
       state.confirmDeleteId = null;
       saveState({ pushCloud: true });
       renderAnilar(contentEl);
-    });
-  });
-
-  document.querySelectorAll("[data-cancel-del]").forEach((cancBtn) => {
-    cancBtn.addEventListener("click", () => {
-      state.confirmDeleteId = null;
-      renderAnilar(contentEl);
+      showToast("memory-feedback", "Anı silindi.");
     });
   });
 }
