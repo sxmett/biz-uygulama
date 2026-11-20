@@ -1,110 +1,91 @@
 import { db, ref, set, onValue } from "./firebase.js";
-import { getDeviceRole, getPartnerRole } from "./state.js";
+import { getDeviceRole } from "./state.js";
 
-// Firebase Console -> Project Settings -> Cloud Messaging -> Web Push certificates
-export const VAPID_PUBLIC_KEY = "BPkDBt0hY4a7NfX8i-anz8C9Lc6F_jv1kNya-5kGI1n982zn09LQnZabrHqZXJArosWpCeNWIVp8vq6C5YsXQXg";
+export const VAPID_PUBLIC_KEY =
+  "BPkDBt0hY4a7NfX8i-anz8C9Lc6F_jv1kNya-5kGI1n982zn09LqnZabrHqZXJArosWpCeNWIVp8vq6C5YsQXg";
 
-let alertBannerTimer = null;
-
-export function showInAppAlertBanner({ kind = "message", title = "", body = "", onOpen = null }) {
-  document.getElementById("biz-live-alert-banner")?.remove();
-  if (alertBannerTimer) {
-    clearTimeout(alertBannerTimer);
-    alertBannerTimer = null;
-  }
-
-  const isCall = kind === "voice_call" || kind === "video_call";
-  const badgeText =
-    kind === "video_call"
-      ? "GÖRÜNTÜLÜ ARAMA"
-      : kind === "voice_call"
-      ? "SESLİ ARAMA"
-      : "YENİ MESAJ";
+function showInAppAlertBanner({ kind, title, body, onOpen }) {
+  document.getElementById("in-app-alert-banner")?.remove();
 
   const banner = document.createElement("div");
-  banner.id = "biz-live-alert-banner";
+  banner.id = "in-app-alert-banner";
+  const isCall = kind === "voice_call" || kind === "video_call";
+
   banner.style.cssText = `
     position: fixed;
     top: 14px;
     left: 50%;
     transform: translateX(-50%);
-    width: min(92vw, 430px);
-    z-index: 100000;
-    background: rgba(22, 20, 26, 0.96);
-    border: 1px solid rgba(230, 46, 101, 0.55);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(12px);
-    border-radius: 16px;
-    padding: 13px 14px;
-    color: #ffffff;
+    width: calc(100% - 28px);
+    max-width: 420px;
+    z-index: 10000;
+    background: ${isCall ? "linear-gradient(135deg, #1f2937, #111827)" : "#ffffff"};
+    color: ${isCall ? "#ffffff" : "#1c191d"};
+    border: 1px solid ${isCall ? "rgba(255,255,255,0.16)" : "rgba(230,46,101,0.25)"};
+    border-radius: 18px;
+    padding: 14px 16px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     cursor: pointer;
+    font-family: inherit;
   `;
 
   banner.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="
-          font-size:10.5px;
-          font-weight:700;
-          letter-spacing:0.4px;
-          background:#e62e65;
-          color:#fff;
-          padding:2px 8px;
-          border-radius:999px;
-        ">${badgeText}</span>
-        <strong style="font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</strong>
-      </div>
-      <span style="
-        font-size:12.5px;
-        color:#e6dce2;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      ">${body}</span>
+    <div style="min-width:0;flex:1;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:2px;">${title || "Yeni Bildirim"}</div>
+      <div style="font-size:12.5px;opacity:0.88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${body || ""}</div>
     </div>
-    <button type="button" id="biz-alert-dismiss" style="
-      border: 1px solid rgba(255,255,255,0.2);
-      background: rgba(255,255,255,0.08);
-      color: #fff;
-      border-radius: 10px;
-      height: 32px;
-      padding: 0 10px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      flex-shrink: 0;
+    <button type="button" id="close-in-app-alert" style="
+      border:none;
+      background:${isCall ? "rgba(255,255,255,0.14)" : "#fff0f5"};
+      color:${isCall ? "#ffffff" : "#d61c4e"};
+      border-radius:10px;
+      padding:6px 10px;
+      font-weight:700;
+      cursor:pointer;
     ">Kapat</button>
   `;
 
   document.body.appendChild(banner);
 
-  const dismiss = () => {
-    if (alertBannerTimer) {
-      clearTimeout(alertBannerTimer);
-      alertBannerTimer = null;
-    }
+  const timer = setTimeout(() => {
     banner.remove();
-  };
+  }, isCall ? 15000 : 5000);
 
   banner.addEventListener("click", (e) => {
-    if (e.target.closest("#biz-alert-dismiss")) {
-      dismiss();
+    if (e.target?.id === "close-in-app-alert") {
+      clearTimeout(timer);
+      banner.remove();
       return;
     }
-    dismiss();
+    clearTimeout(timer);
+    banner.remove();
     onOpen?.();
   });
+}
 
-  document.getElementById("biz-alert-dismiss")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    dismiss();
-  });
+export async function dispatchNotificationEvent({ kind = "message", title = "", body = "", callId = "" }) {
+  const senderRole = getDeviceRole() || "userA";
+  const targetRole = senderRole === "userA" ? "userB" : "userA";
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  alertBannerTimer = setTimeout(dismiss, isCall ? 12000 : 5000);
+  try {
+    await set(ref(db, `biz_room/push_queue/${id}`), {
+      id,
+      senderRole,
+      targetRole,
+      kind,
+      title,
+      body,
+      callId,
+      createdAt: Date.now()
+    });
+  } catch (err) {
+    console.warn("Push kuyruğuna yazılamadı:", err);
+  }
 }
 
 export async function setupPushNotifications({ onIncomingAlert } = {}) {
@@ -113,19 +94,17 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
   try {
     if ("serviceWorker" in navigator) {
       swRegistration = await navigator.serviceWorker.register("/sw.js");
-      console.log("SW kaydı tamam:", swRegistration.scope);
     }
   } catch (err) {
-    console.warn("SW kayıt hatası:", err);
+    console.warn("Service Worker kaydı yapılamadı:", err);
   }
 
   try {
     if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      const perm = await Notification.requestPermission();
-      console.log("Bildirim izni sonucu:", perm);
+      await Notification.requestPermission();
     }
   } catch (err) {
-    console.warn("İzin isteme hatası:", err);
+    console.warn("Bildirim izni alınamadı:", err);
   }
 
   try {
@@ -134,11 +113,13 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js"
     );
 
-    console.log("Firebase app var mı?:", Boolean(firebaseAppMod.app));
-    console.log("Notification izni:", typeof Notification !== "undefined" ? Notification.permission : "yok");
+    const supported =
+      firebaseAppMod.app &&
+      typeof messagingMod.isSupported === "function" &&
+      (await messagingMod.isSupported());
 
     if (
-      firebaseAppMod.app &&
+      supported &&
       typeof Notification !== "undefined" &&
       Notification.permission === "granted" &&
       VAPID_PUBLIC_KEY &&
@@ -150,15 +131,12 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
         serviceWorkerRegistration: swRegistration || undefined
       });
 
-      console.log("Alınan FCM token:", token);
-
       const myRole = getDeviceRole() || "userA";
       if (token) {
         await set(ref(db, `biz_room/push_tokens/${myRole}`), {
           token,
           updatedAt: Date.now()
         });
-        console.log("Token veritabanına yazıldı:", myRole);
       }
 
       messagingMod.onMessage(messaging, (payload) => {
@@ -186,7 +164,7 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
       });
     }
   } catch (err) {
-    console.warn("FCM token/messaging hatası:", err);
+    console.warn("FCM bu ortamda desteklenmiyor veya atlandı:", err);
   }
 
   const myRole = getDeviceRole() || "userA";
@@ -215,21 +193,4 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
       }
     });
   });
-}
-
-export async function dispatchNotificationEvent({ kind, title, body, callId = null }) {
-  const senderRole = getDeviceRole() || "userA";
-  const targetRole = getPartnerRole(senderRole);
-  const eventId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  await set(ref(db, `biz_room/push_queue/${eventId}`), {
-    id: eventId,
-    senderRole,
-    targetRole,
-    kind, // "message" | "voice_call" | "video_call"
-    title,
-    body,
-    callId,
-    createdAt: Date.now()
-  }).catch(() => {});
 }
