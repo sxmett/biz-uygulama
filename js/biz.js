@@ -4,7 +4,8 @@ import {
   showToast,
   saveState,
   syncDailyMissReset,
-  clearDeviceRole
+  clearDeviceRole,
+  writeMyProfileChanges
 } from "./state.js";
 import { openPasscodeLockOverlay, renderApp } from "./app.js";
 
@@ -62,6 +63,65 @@ function renderAvatarWithCount(name, photoSrc, count, countId) {
       <span class="avatar-miss-count" id="${countId}">${count}</span>
     </div>
   `;
+}
+
+function openLogoutConfirmModal() {
+  document.getElementById("logout-confirm-overlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "logout-confirm-overlay";
+  overlay.style.cssText = `
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(24, 14, 20, 0.45);
+    backdrop-filter: blur(4px);
+  `;
+
+  overlay.innerHTML = `
+    <div style="
+      width: 100%;
+      max-width: 320px;
+      background: #ffffff;
+      border-radius: 22px;
+      padding: 22px 20px;
+      text-align: center;
+      box-shadow: 0 20px 44px rgba(0, 0, 0, 0.22);
+    ">
+      <h3 style="margin: 0 0 8px; font-size: 18px; color: #1c191d;">Çıkış Onayı</h3>
+      <p style="margin: 0 0 18px; font-size: 13.5px; color: #675d64; line-height: 1.45;">
+        Çıkış yapmak istiyor musunuz? Tekrar girmek için parolanızı yazmanız gerekecek.
+      </p>
+      <div style="display: flex; gap: 10px; justify-content: center;">
+        <button type="button" class="tool-btn" id="cancel-logout-btn" style="flex: 1;">İptal</button>
+        <button type="button" class="mini-btn" id="confirm-logout-btn" style="flex: 1;">Çıkış Yap</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  document.getElementById("cancel-logout-btn")?.addEventListener("click", () => {
+    overlay.remove();
+  });
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  document.getElementById("confirm-logout-btn")?.addEventListener("click", () => {
+    overlay.remove();
+    isEditingCouple = false;
+    clearDeviceRole();
+    renderApp();
+    openPasscodeLockOverlay(() => {
+      renderApp();
+    });
+  });
 }
 
 export function renderBiz(contentEl) {
@@ -196,7 +256,7 @@ export function renderBiz(contentEl) {
     <div class="grid-two">
       <div class="card">
         <div class="label">Onun Modu</div>
-        <strong>${state.partnerMood}</strong>
+        <strong>${state.partnerMood || "Belirtilmedi"}</strong>
         <div class="sub-metric">Mesafe: ${Number(state.distanceKm).toFixed(1)} km</div>
       </div>
 
@@ -209,14 +269,14 @@ export function renderBiz(contentEl) {
 
     <div class="card">
       <div class="label">Senin Notun</div>
-      <strong>${state.myNote}</strong>
+      <strong>${state.myNote || "Henüz not eklenmedi."}</strong>
       <div class="mini-row">
         <input
           type="text"
           id="my-note-input"
           class="msg-input plain-input"
           placeholder="Kısa bir not bırak..."
-          value="${state.myNote}"
+          value="${(state.myNote || "").replace(/"/g, "&quot;")}"
         />
         <button type="button" class="mini-btn" id="save-note-btn">Kaydet</button>
       </div>
@@ -265,12 +325,7 @@ export function renderBiz(contentEl) {
   });
 
   document.getElementById("logout-role-btn").addEventListener("click", () => {
-    isEditingCouple = false;
-    clearDeviceRole();
-    renderApp();
-    openPasscodeLockOverlay(() => {
-      renderApp();
-    });
+    openLogoutConfirmModal();
   });
 
   if (isEditingCouple) {
@@ -279,7 +334,7 @@ export function renderBiz(contentEl) {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        state.myAvatar = reader.result;
+        writeMyProfileChanges({ avatar: reader.result });
         saveState({ pushCloud: true });
         renderBiz(contentEl);
       };
@@ -299,7 +354,7 @@ export function renderBiz(contentEl) {
     });
 
     document.getElementById("remove-my-avatar")?.addEventListener("click", () => {
-      state.myAvatar = null;
+      writeMyProfileChanges({ avatar: null });
       saveState({ pushCloud: true });
       renderBiz(contentEl);
     });
@@ -317,13 +372,11 @@ export function renderBiz(contentEl) {
 
     document.getElementById("save-couple-edit").addEventListener("click", () => {
       const myVal = document.getElementById("my-name-input").value.trim();
-      const partnerVal = document.getElementById("partner-name-input").value.trim();
       const dateVal = document.getElementById("start-date-input").value;
       const eventTitleVal = document.getElementById("special-event-title-input").value.trim();
       const eventDateVal = document.getElementById("special-event-date-input").value;
 
-      if (myVal) state.myName = myVal;
-      if (partnerVal) state.partnerName = partnerVal;
+      if (myVal) writeMyProfileChanges({ name: myVal });
 
       if (dateVal) {
         const parsedDate = new Date(dateVal);
@@ -350,14 +403,14 @@ export function renderBiz(contentEl) {
       isEditingCouple = false;
       saveState({ pushCloud: true });
       renderBiz(contentEl);
-      showToast("miss-feedback", "İsimler, fotoğraflar, tarih ve özel gün güncellendi.");
+      showToast("miss-feedback", "Profil, tarih ve özel gün güncellendi.");
     });
   }
 
   document.getElementById("save-note-btn").addEventListener("click", () => {
     const val = document.getElementById("my-note-input").value.trim();
     if (!val) return;
-    state.myNote = val;
+    writeMyProfileChanges({ note: val });
     saveState({ pushCloud: true });
     renderBiz(contentEl);
     showToast("miss-feedback", "Notun güncellendi.");
@@ -365,18 +418,17 @@ export function renderBiz(contentEl) {
 
   document.querySelectorAll("[data-mood]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.partnerMood = btn.dataset.mood;
+      writeMyProfileChanges({ mood: btn.dataset.mood });
       saveState({ pushCloud: true });
       renderBiz(contentEl);
-      showToast("miss-feedback", `Modun "${state.partnerMood}" olarak güncellendi.`);
+      showToast("miss-feedback", `Modun "${btn.dataset.mood}" olarak güncellendi.`);
     });
   });
 
   document.getElementById("miss-btn").addEventListener("click", () => {
     syncDailyMissReset();
-    state.myMissCount = (state.myMissCount || 0) + 1;
-    state.partnerMissCount = state.myMissCount;
-    state.missCount = state.myMissCount;
+    const nextCount = (state.myMissCount || 0) + 1;
+    writeMyProfileChanges({ missCount: nextCount });
     state.lastMissTime = nowTime();
     saveState({ pushCloud: true });
     renderBiz(contentEl);
