@@ -4,6 +4,7 @@ import {
   initRealtimeSync,
   getDeviceRole,
   setDeviceRole,
+  resolveRoleFromPasscode,
   requestNotificationPermissionSafe
 } from "./state.js";
 import { renderBiz, clearBizClock } from "./biz.js";
@@ -12,11 +13,11 @@ import { renderKonum } from "./konum.js";
 import { renderAnilar } from "./anilar.js";
 import { renderAdmin } from "./admin.js";
 
-function renderRoleOnboardingOverlay(onSelected) {
-  document.getElementById("role-onboarding-overlay")?.remove();
+export function openPasscodeLockOverlay(onUnlocked) {
+  document.getElementById("passcode-lock-overlay")?.remove();
 
   const overlay = document.createElement("div");
-  overlay.id = "role-onboarding-overlay";
+  overlay.id = "passcode-lock-overlay";
   overlay.style.cssText = `
     position: fixed;
     inset: 0;
@@ -25,72 +26,178 @@ function renderRoleOnboardingOverlay(onSelected) {
     align-items: center;
     justify-content: center;
     padding: 24px;
-    background: linear-gradient(160deg, #ff758c 0%, #ff7eb3 50%, #f857a6 100%);
+    background: radial-gradient(circle at top left, #ff9a9e 0%, #ff6a88 48%, #e84393 100%);
+    backdrop-filter: blur(8px);
   `;
 
   overlay.innerHTML = `
     <div style="
       width: 100%;
-      max-width: 360px;
-      background: rgba(255, 255, 255, 0.96);
-      border-radius: 24px;
-      padding: 28px 22px;
+      max-width: 368px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 28px;
+      padding: 30px 24px 26px;
       text-align: center;
-      box-shadow: 0 20px 50px rgba(136, 14, 79, 0.28);
+      box-shadow: 0 24px 60px rgba(120, 12, 68, 0.34);
+      font-family: inherit;
     ">
-      <div style="font-size: 28px; margin-bottom: 6px;">♥</div>
-      <h2 style="margin: 0 0 8px; font-size: 21px; color: #1f1f24;">Hoş Geldin</h2>
-      <p style="margin: 0 0 22px; font-size: 14px; color: #555562; line-height: 1.45;">
-        Bu cihaz kime ait? Seçimini yap, her şey birlikte senkronize çalışsın.
-      </p>
+      <div style="
+        width: 54px;
+        height: 54px;
+        margin: 0 auto 14px;
+        border-radius: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #ff5e8e, #ff2e63);
+        color: #ffffff;
+        font-size: 24px;
+        box-shadow: 0 10px 24px rgba(255, 46, 99, 0.32);
+      ">♥</div>
 
-      <div style="display: flex; flex-direction: column; gap: 12px;">
-        <button
-          type="button"
-          id="pick-role-samet"
+      <h2 style="
+        margin: 0 0 6px;
+        font-size: 22px;
+        font-weight: 700;
+        color: #1c191d;
+        letter-spacing: -0.3px;
+      ">Parolayı Girin</h2>
+
+      <p style="
+        margin: 0 0 22px;
+        font-size: 13.5px;
+        color: #675d64;
+        line-height: 1.5;
+      ">Özel alanınıza giriş yapmak için size tanımlanan parolayı yazın.</p>
+
+      <form id="passcode-unlock-form" style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="position: relative; width: 100%;">
+          <input
+            type="password"
+            id="passcode-code-input"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            placeholder="Parolanızı girin"
+            style="
+              width: 100%;
+              box-sizing: border-box;
+              padding: 15px 48px 15px 16px;
+              border-radius: 16px;
+              border: 1.5px solid #f1d5e1;
+              background: #fff9fb;
+              color: #1c191d;
+              font-size: 16px;
+              font-weight: 600;
+              letter-spacing: 1.5px;
+              text-align: center;
+              outline: none;
+              transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            "
+          />
+
+          <button
+            type="button"
+            id="toggle-passcode-visibility"
+            aria-label="Parolayı göster veya gizle"
+            title="Göster / Gizle"
+            style="
+              position: absolute;
+              right: 10px;
+              top: 50%;
+              transform: translateY(-50%);
+              width: 34px;
+              height: 34px;
+              border: none;
+              border-radius: 10px;
+              background: transparent;
+              color: #8b5e75;
+              font-size: 15px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              cursor: pointer;
+            "
+          >👁</button>
+        </div>
+
+        <div
+          id="passcode-error-msg"
           style="
+            min-height: 18px;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #d61c4e;
+          "
+        ></div>
+
+        <button
+          type="submit"
+          id="passcode-submit-btn"
+          style="
+            width: 100%;
             padding: 15px 18px;
             border: none;
             border-radius: 16px;
-            background: #ff4d79;
+            background: linear-gradient(135deg, #ff4d7d, #e62e65);
             color: #ffffff;
-            font-size: 16px;
+            font-size: 15.5px;
             font-weight: 700;
             cursor: pointer;
-            box-shadow: 0 8px 20px rgba(255, 77, 121, 0.35);
+            box-shadow: 0 12px 24px rgba(230, 46, 101, 0.32);
+            transition: transform 0.15s ease, opacity 0.15s ease;
           "
-        >Samet</button>
-
-        <button
-          type="button"
-          id="pick-role-emine"
-          style="
-            padding: 15px 18px;
-            border: 2px solid #ff4d79;
-            border-radius: 16px;
-            background: #fff0f5;
-            color: #d81b60;
-            font-size: 16px;
-            font-weight: 700;
-            cursor: pointer;
-          "
-        >Emine</button>
-      </div>
+        >Giriş Yap</button>
+      </form>
     </div>
   `;
 
   document.body.appendChild(overlay);
 
-  document.getElementById("pick-role-samet")?.addEventListener("click", () => {
-    setDeviceRole("userA");
-    overlay.remove();
-    onSelected?.();
+  const inputEl = document.getElementById("passcode-code-input");
+  const toggleBtn = document.getElementById("toggle-passcode-visibility");
+  const errorEl = document.getElementById("passcode-error-msg");
+  const formEl = document.getElementById("passcode-unlock-form");
+
+  toggleBtn?.addEventListener("click", () => {
+    if (!inputEl) return;
+    const isHidden = inputEl.type === "password";
+    inputEl.type = isHidden ? "text" : "password";
+    toggleBtn.textContent = isHidden ? "🙈" : "👁";
+    inputEl.focus();
   });
 
-  document.getElementById("pick-role-emine")?.addEventListener("click", () => {
-    setDeviceRole("userB");
+  inputEl?.addEventListener("focus", () => {
+    inputEl.style.borderColor = "#ff4d7d";
+    inputEl.style.boxShadow = "0 0 0 4px rgba(255, 77, 125, 0.14)";
+  });
+
+  inputEl?.addEventListener("blur", () => {
+    inputEl.style.borderColor = "#f1d5e1";
+    inputEl.style.boxShadow = "none";
+  });
+
+  inputEl?.addEventListener("input", () => {
+    if (errorEl) errorEl.textContent = "";
+  });
+
+  setTimeout(() => inputEl?.focus(), 60);
+
+  formEl?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const matchedRole = resolveRoleFromPasscode(inputEl?.value || "");
+
+    if (!matchedRole) {
+      if (errorEl) errorEl.textContent = "Hatalı parola. Lütfen tekrar deneyin.";
+      inputEl?.focus();
+      inputEl?.select();
+      return;
+    }
+
+    setDeviceRole(matchedRole);
     overlay.remove();
-    onSelected?.();
+    onUnlocked?.();
   });
 }
 
@@ -167,10 +274,10 @@ export function renderApp() {
 
 function startAppAfterRoleReady() {
   renderApp();
-
   requestNotificationPermissionSafe();
 
   initRealtimeSync(() => {
+    if (!getDeviceRole()) return;
     if (state.activeTab === "sohbet") {
       markIncomingMessagesAsRead();
       const contentEl = document.getElementById("app-content") || document.getElementById("content");
@@ -192,7 +299,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const existingRole = getDeviceRole();
   if (!existingRole) {
     renderApp();
-    renderRoleOnboardingOverlay(() => {
+    openPasscodeLockOverlay(() => {
       startAppAfterRoleReady();
     });
   } else {
