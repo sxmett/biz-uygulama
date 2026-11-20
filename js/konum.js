@@ -63,11 +63,82 @@ function formatDistance(kmValue) {
 }
 
 function getFillPercent(myCoords, partnerCoords, kmValue) {
-  if (!myCoords || !partnerCoords) return 20;
+  if (!myCoords || !partnerCoords) return 22;
   const km = Number(kmValue || 0);
   if (km <= 0.2) return 100;
-  if (km >= 50) return 24;
-  return Math.max(24, Math.min(96, Math.round(100 - (km / 50) * 72)));
+  if (km >= 50) return 25;
+  return Math.max(25, Math.min(96, Math.round(100 - (km / 50) * 71)));
+}
+
+function withTimeout(promise, ms, msg = "Konum alma süresi doldu.") {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(msg)), ms);
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+function watchSinglePosition(options, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== "function") {
+      reject(new Error("Bu cihazda konum servisi bulunamadı."));
+      return;
+    }
+
+    let settled = false;
+    let watchId = null;
+
+    const cleanup = () => {
+      if (watchId !== null && typeof navigator.geolocation.clearWatch === "function") {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+    };
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Konum sinyali zaman aşımına uğradı."));
+    }, timeoutMs);
+
+    try {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cleanup();
+          resolve({
+            lat: Number(Number(pos.coords.latitude).toFixed(6)),
+            lng: Number(Number(pos.coords.longitude).toFixed(6))
+          });
+        },
+        (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cleanup();
+          reject(err);
+        },
+        options
+      );
+    } catch (err) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        reject(err);
+      }
+    }
+  });
 }
 
 async function acquireDevicePosition() {
@@ -79,68 +150,70 @@ async function acquireDevicePosition() {
   if (capGeo && typeof capGeo.getCurrentPosition === "function") {
     if (typeof capGeo.requestPermissions === "function") {
       try {
-        await capGeo.requestPermissions();
+        await withTimeout(capGeo.requestPermissions(), 6000);
       } catch {
-        // İzin durumu kontrol edilecek
+        // İzin durumu getCurrentPosition'da netleşecek
       }
     }
-    const pos = await capGeo.getCurrentPosition({
-      enableHighAccuracy: true,
-      timeout: 12000
-    });
-    if (pos?.coords) {
-      return {
-        lat: Number(Number(pos.coords.latitude).toFixed(6)),
-        lng: Number(Number(pos.coords.longitude).toFixed(6))
-      };
+    try {
+      const pos = await withTimeout(
+        capGeo.getCurrentPosition({ enableHighAccuracy: false, timeout: 10000 }),
+        11000
+      );
+      if (pos?.coords && Number.isFinite(Number(pos.coords.latitude))) {
+        return {
+          lat: Number(Number(pos.coords.latitude).toFixed(6)),
+          lng: Number(Number(pos.coords.longitude).toFixed(6))
+        };
+      }
+    } catch {
+      // Navigator yedeğine geç
     }
   }
 
   if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
-    throw new Error("Bu ortamda konum servisi bulunamadı.");
+    throw new Error("Bu ortamda konum servisi desteklenmiyor.");
   }
 
-  const getPosWithOptions = (options) =>
-    new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          resolve({
-            lat: Number(Number(pos.coords.latitude).toFixed(6)),
-            lng: Number(Number(pos.coords.longitude).toFixed(6))
-          });
-        },
-        (err) => reject(err),
-        options
-      );
-    });
+  const getOnce = (options, ms) =>
+    withTimeout(
+      new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) =>
+            resolve({
+              lat: Number(Number(pos.coords.latitude).toFixed(6)),
+              lng: Number(Number(pos.coords.longitude).toFixed(6))
+            }),
+          (err) => reject(err),
+          options
+        );
+      }),
+      ms
+    );
 
   try {
-    return await getPosWithOptions({
-      enableHighAccuracy: true,
-      timeout: 8000,
-      maximumAge: 15000
-    });
+    return await getOnce({ enableHighAccuracy: false, timeout: 7000, maximumAge: 60000 }, 8000);
   } catch {
-    return await getPosWithOptions({
-      enableHighAccuracy: false,
-      timeout: 14000,
-      maximumAge: 60000
-    });
+    try {
+      return await getOnce({ enableHighAccuracy: true, timeout: 9000, maximumAge: 15000 }, 10000);
+    } catch {
+      return await watchSinglePosition({ enableHighAccuracy: false, maximumAge: 60000 }, 12000);
+    }
   }
 }
 
 function explainGeoError(err) {
   const code = err?.code;
   if (code === 1) {
-    return "Konum izni reddedildi veya kapalı. Telefon Ayarları -> Uygulamalar -> Konum iznini açıp tekrar dene ya da aşağıdan koordinat gir.";
+    return "Konum izni kapalı. Telefon Ayarları -> Uygulamalar -> Konum iznini 'İzin ver' yap.";
   }
   if (code === 2) {
-    return "GPS / Konum sinyali alınamadı. Telefonun Konum servisini aç veya aşağıdan koordinat gir.";
+    return "Konum sinyali alınamadı. Telefonun Konum (GPS) servisinin açık olduğundan emin ol.";
   }
   if (code === 3) {
-    return "GPS yanıt vermedi (zaman aşımı). Dilersen aşağıdan koordinat/yer adı girerek hemen kaydedebilirsin.";
+    return "Konum alma süresi doldu. Konum servisini açıp tekrar dene.";
   }
-  return `${err?.message || "GPS konumu çekilemedi."} Dilersen aşağıdan koordinat/yer adı girerek kaydedebilirsin.`;
+  return err?.message || "Konum alınamadı. Konum iznini ve GPS'i kontrol et.";
 }
 
 export function renderKonum(contentEl) {
@@ -163,10 +236,11 @@ export function renderKonum(contentEl) {
   const distanceText = formatDistance(kmValue);
   const fillPercent = getFillPercent(myCoords, partnerCoords, kmValue);
 
-  const myPlaceText = myLoc?.label || "Henüz paylaşılmadı";
+  const myPlaceText = myLoc?.label || (myCoords ? `${myCoords.lat}, ${myCoords.lng}` : "Henüz paylaşılmadı");
   const myUpdatedText = myLoc?.updatedAt ? `Güncel: ${myLoc.updatedAt}` : "Güncel: Henüz güncellenmedi";
 
-  const partnerPlaceText = partnerLoc?.label || "Henüz paylaşılmadı";
+  const partnerPlaceText =
+    partnerLoc?.label || (partnerCoords ? `${partnerCoords.lat}, ${partnerCoords.lng}` : "Henüz paylaşılmadı");
   const partnerUpdatedText = partnerLoc?.updatedAt
     ? `Güncel: ${partnerLoc.updatedAt}`
     : "Güncel: Henüz güncellenmedi";
@@ -217,46 +291,15 @@ export function renderKonum(contentEl) {
           <div class="label">SENİN KONUMUN · ${myName.toUpperCase()}</div>
           <span class="badge">${myUpdatedText}</span>
         </div>
-        <h3 style="margin:6px 0 4px;">${myPlaceText}</h3>
+        <h3 style="margin:8px 0 4px;">${myPlaceText}</h3>
         ${
           myCoords
-            ? `<div class="loc-coords-pill">Konum: ${myCoords.lat}, ${myCoords.lng}</div>`
-            : `<div class="loc-coords-pill">Henüz koordinat eklenmedi</div>`
+            ? `<div class="loc-coords-pill">Enlem: ${myCoords.lat} · Boylam: ${myCoords.lng}</div>`
+            : `<div class="loc-coords-pill">Henüz konum çekilmedi</div>`
         }
 
-        <div class="row" style="gap:8px;margin-top:12px;margin-bottom:8px;">
-          <input
-            type="text"
-            id="location-label-input"
-            class="msg-input plain-input"
-            placeholder="Yer adı yaz (Örn: Ev, Kampüs)"
-            value="${(myLoc?.label || "").replace(/"/g, "&quot;")}"
-          />
-          <button type="button" class="tool-btn" id="save-location-label-btn">Kaydet</button>
-        </div>
-
-        <div class="loc-manual-grid">
-          <input
-            type="number"
-            step="any"
-            id="location-lat-input"
-            class="msg-input plain-input"
-            placeholder="Enlem (Örn: 39.9334)"
-            value="${myCoords ? myCoords.lat : ""}"
-          />
-          <input
-            type="number"
-            step="any"
-            id="location-lng-input"
-            class="msg-input plain-input"
-            placeholder="Boylam (Örn: 32.8597)"
-            value="${myCoords ? myCoords.lng : ""}"
-          />
-        </div>
-
-        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;">
           <button type="button" class="send-btn" id="get-my-location-btn">Konumumu Al</button>
-          <button type="button" class="tool-btn" id="save-coords-btn">Koordinatı Kaydet</button>
           <span id="location-status-note" class="muted-note"></span>
         </div>
 
@@ -269,11 +312,11 @@ export function renderKonum(contentEl) {
           <div class="label">SEVGİLİNİN KONUMU · ${partnerName.toUpperCase()}</div>
           <span class="badge">${partnerUpdatedText}</span>
         </div>
-        <h3 style="margin:6px 0 4px;">${partnerPlaceText}</h3>
+        <h3 style="margin:8px 0 4px;">${partnerPlaceText}</h3>
         ${
           partnerCoords
-            ? `<div class="loc-coords-pill">Konum: ${partnerCoords.lat}, ${partnerCoords.lng}</div>`
-            : `<div class="loc-coords-pill">Henüz koordinat eklenmedi</div>`
+            ? `<div class="loc-coords-pill">Enlem: ${partnerCoords.lat} · Boylam: ${partnerCoords.lng}</div>`
+            : `<div class="loc-coords-pill">Henüz konum paylaşılmadı</div>`
         }
         <div class="muted-note" style="margin-top:8px;">Aradaki mesafe: ${distanceText}</div>
       </div>
@@ -300,60 +343,6 @@ export function renderKonum(contentEl) {
     }
   };
 
-  document.getElementById("save-location-label-btn")?.addEventListener("click", () => {
-    const inputEl = document.getElementById("location-label-input");
-    const label = (inputEl?.value || "").trim();
-    if (!label) {
-      showError("Önce bir yer adı yazmalısın (örneğin Ev veya Kampüs).");
-      return;
-    }
-
-    const updated = {
-      ...(myLoc || {}),
-      role,
-      label,
-      updatedAt: nowTime()
-    };
-
-    writeMyLocation(role, updated);
-    saveState({ pushCloud: true });
-    renderKonum(contentEl);
-  });
-
-  document.getElementById("save-coords-btn")?.addEventListener("click", () => {
-    const latVal = Number(document.getElementById("location-lat-input")?.value);
-    const lngVal = Number(document.getElementById("location-lng-input")?.value);
-    const labelVal = (document.getElementById("location-label-input")?.value || "").trim();
-
-    if (!Number.isFinite(latVal) || !Number.isFinite(lngVal) || (latVal === 0 && lngVal === 0)) {
-      showError("Geçerli bir enlem ve boylam değeri gir (örneğin 39.9334 ve 32.8597).");
-      return;
-    }
-
-    const lat = Number(latVal.toFixed(6));
-    const lng = Number(lngVal.toFixed(6));
-
-    const updated = {
-      ...(myLoc || {}),
-      role,
-      label: labelVal || myLoc?.label || `${lat}, ${lng}`,
-      lat,
-      lng,
-      updatedAt: nowTime()
-    };
-
-    writeMyLocation(role, updated);
-
-    if (partnerCoords) {
-      state.distanceKm = Number(
-        haversineKm(lat, lng, partnerCoords.lat, partnerCoords.lng).toFixed(1)
-      );
-    }
-
-    saveState({ pushCloud: true });
-    renderKonum(contentEl);
-  });
-
   document.getElementById("get-my-location-btn")?.addEventListener("click", async () => {
     const btnEl = document.getElementById("get-my-location-btn");
     const statusNote = document.getElementById("location-status-note");
@@ -363,13 +352,12 @@ export function renderKonum(contentEl) {
 
     try {
       const { lat, lng } = await acquireDevicePosition();
-      const inputEl = document.getElementById("location-label-input");
-      const typedLabel = (inputEl?.value || "").trim();
+      const label = `${lat}, ${lng}`;
 
       const updated = {
         ...(myLoc || {}),
         role,
-        label: typedLabel || myLoc?.label || `${lat}, ${lng}`,
+        label,
         lat,
         lng,
         updatedAt: nowTime()
