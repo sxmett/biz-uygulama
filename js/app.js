@@ -21,9 +21,15 @@ import {
 import { renderKonum } from "./konum.js";
 import { renderAnilar } from "./anilar.js";
 import { renderAdmin } from "./admin.js";
-import { setupPushNotifications, teardownPushNotifications } from "./notifications.js";
+import {
+  setupPushNotifications,
+  teardownPushNotifications,
+  showPhoneNotificationPanel
+} from "./notifications.js";
 
 let prevMessageCount = state.messages.length;
+let lastNotifiedMsgId = null;
+let lastNotifiedCallKey = null;
 
 export function performFullLogout() {
   clearDeviceRole();
@@ -346,6 +352,57 @@ function bindPresenceLifecycle() {
   });
 }
 
+function notifyIfBackgroundMessage() {
+  if (!getDeviceRole()) return;
+  if (document.visibilityState === "visible") return;
+  if (!Array.isArray(state.messages) || state.messages.length === 0) return;
+
+  const latest = state.messages[state.messages.length - 1];
+  if (!latest || latest.sender !== "them") return;
+
+  const msgKey = String(latest.id ?? latest.createdAt ?? "");
+  if (!msgKey || msgKey === lastNotifiedMsgId) return;
+  lastNotifiedMsgId = msgKey;
+
+  const senderTitle = state.partnerName || "Yeni Mesaj";
+  const previewText =
+    latest.type === "voice"
+      ? "🎤 Sesli mesaj gönderdi"
+      : latest.type === "photo"
+      ? "📷 Fotoğraf gönderdi"
+      : latest.text || "Yeni bir mesajın var.";
+
+  showPhoneNotificationPanel({
+    title: `💬 ${senderTitle}`,
+    body: previewText,
+    kind: "message"
+  });
+}
+
+function notifyIfBackgroundCall(signal) {
+  if (!getDeviceRole() || !signal || typeof signal !== "object") return;
+  const myRole = getDeviceRole();
+  const isIncoming =
+    signal.status === "ringing" &&
+    signal.fromRole &&
+    signal.fromRole !== myRole;
+  if (!isIncoming) return;
+
+  const callKey = String(signal.callId || signal.updatedAt || signal.ts || "");
+  if (!callKey || callKey === lastNotifiedCallKey) return;
+  lastNotifiedCallKey = callKey;
+
+  if (document.visibilityState !== "visible") {
+    const isVideo = signal.mode === "video" || signal.kind === "video_call";
+    showPhoneNotificationPanel({
+      title: isVideo ? "📹 Görüntülü Arama" : "📞 Sesli Arama",
+      body: `${state.partnerName || "Sevgilin"} seni arıyor...`,
+      kind: isVideo ? "video_call" : "voice_call",
+      callId: signal.callId || null
+    });
+  }
+}
+
 let presenceBound = false;
 
 function startAppAfterRoleReady() {
@@ -368,12 +425,15 @@ function startAppAfterRoleReady() {
 
   initCallSignalListener((signal) => {
     if (!getDeviceRole()) return;
+    notifyIfBackgroundCall(signal);
     const contentEl = document.getElementById("app-content") || document.getElementById("content");
     handleIncomingCallSignal(signal, contentEl);
   });
 
   initRealtimeSync(() => {
     if (!getDeviceRole()) return;
+    notifyIfBackgroundMessage();
+
     const contentEl = document.getElementById("app-content") || document.getElementById("content");
     if (!contentEl) return;
 
