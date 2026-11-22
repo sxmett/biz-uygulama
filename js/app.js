@@ -3,8 +3,10 @@ import {
   setAdminOwner,
   initRealtimeSync,
   initCallSignalListener,
+  stopCallSignalListener,
   getDeviceRole,
   setDeviceRole,
+  clearDeviceRole,
   resolveRoleFromPasscode,
   setMyPresence,
   setMyTypingStatus
@@ -19,9 +21,21 @@ import {
 import { renderKonum } from "./konum.js";
 import { renderAnilar } from "./anilar.js";
 import { renderAdmin } from "./admin.js";
-import { setupPushNotifications } from "./notifications.js";
+import { setupPushNotifications, teardownPushNotifications } from "./notifications.js";
 
 let prevMessageCount = state.messages.length;
+
+export function performFullLogout() {
+  clearDeviceRole();
+  teardownPushNotifications();
+  stopCallSignalListener();
+  document.getElementById("wa-call-screen-overlay")?.remove();
+  state.activeTab = "biz";
+  renderApp();
+  openPasscodeLockOverlay(() => {
+    startAppAfterRoleReady();
+  });
+}
 
 export function openPasscodeLockOverlay(onUnlocked) {
   document.getElementById("passcode-lock-overlay")?.remove();
@@ -259,7 +273,7 @@ export function renderApp() {
     clearBizClock();
   }
 
-  if (state.activeTab === "sohbet") {
+  if (getDeviceRole() && state.activeTab === "sohbet") {
     markIncomingMessagesAsRead();
   }
 
@@ -324,6 +338,7 @@ function startAppAfterRoleReady() {
 
   setupPushNotifications({
     onIncomingAlert: () => {
+      if (!getDeviceRole()) return;
       state.activeTab = "sohbet";
       renderApp();
     }
