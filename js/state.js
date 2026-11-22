@@ -19,6 +19,9 @@ function createEmptyUserProfile(role) {
     avatar: null,
     mood: "Uyuyor",
     note: "",
+    online: false,
+    lastSeen: "Henüz görülmedi",
+    lastSeenAt: 0,
     location: {
       lat: null,
       lon: null,
@@ -44,7 +47,10 @@ export const defaultState = {
   partnerName: "Emine",
   myAvatar: null,
   partnerAvatar: null,
+  myMood: "Uyuyor",
   partnerMood: "Uyuyor",
+  partnerOnline: false,
+  partnerLastSeen: "Henüz görülmedi",
   partnerNote: "",
   myNote: "",
   moods: ["Uyuyor", "Seni özledi", "Derste / Çalışıyor", "Yolda"],
@@ -142,7 +148,10 @@ export function syncRoleViewFields() {
   state.partnerAvatar = partner.avatar ?? null;
   state.myNote = me.note ?? "";
   state.partnerNote = partner.note ?? "";
+  state.myMood = me.mood || "Uyuyor";
   state.partnerMood = partner.mood || "Uyuyor";
+  state.partnerOnline = Boolean(partner.online);
+  state.partnerLastSeen = partner.lastSeen || "Henüz görülmedi";
   state.myLocation = { ...me.location };
   state.partnerLocation = { ...partner.location };
   state.myMissCount = Number(me.missCount) || 0;
@@ -219,6 +228,11 @@ export function setDeviceRole(role) {
     // Sessiz geç
   }
   syncRoleViewFields();
+  writeMyProfileChanges({
+    online: true,
+    lastSeen: `Bugün ${nowTime()}`,
+    lastSeenAt: Date.now()
+  });
   state.messages = normalizeMessagesForRole(state.messages);
   saveState({ pushCloud: true });
   return safeRole;
@@ -232,6 +246,15 @@ export function resolveRoleFromPasscode(rawCode) {
 }
 
 export function clearDeviceRole() {
+  const currentRole = getDeviceRole();
+  if (currentRole) {
+    writeMyProfileChanges({
+      online: false,
+      lastSeen: `Bugün ${nowTime()}`,
+      lastSeenAt: Date.now()
+    });
+    saveState({ pushCloud: true });
+  }
   try {
     localStorage.removeItem(DEVICE_ROLE_KEY);
   } catch {
@@ -300,6 +323,16 @@ function applySharedSnapshot(dataSource) {
   if (!sameDay) {
     mergedProfiles.userA.missCount = 0;
     mergedProfiles.userB.missCount = 0;
+  }
+
+  // Kendi online durumumuzu koruyarak buluttan gelen veriyi uygula
+  const myRole = getDeviceRole();
+  if (myRole && state.userProfiles?.[myRole]) {
+    mergedProfiles[myRole].online = Boolean(state.userProfiles[myRole].online);
+    mergedProfiles[myRole].lastSeen =
+      state.userProfiles[myRole].lastSeen || mergedProfiles[myRole].lastSeen;
+    mergedProfiles[myRole].lastSeenAt =
+      state.userProfiles[myRole].lastSeenAt || mergedProfiles[myRole].lastSeenAt;
   }
 
   state.userProfiles = mergedProfiles;
@@ -380,6 +413,7 @@ export function buildPersistPayload() {
     partnerName: state.partnerName,
     myAvatar: state.myAvatar,
     partnerAvatar: state.partnerAvatar,
+    myMood: state.myMood,
     partnerMood: state.partnerMood,
     partnerNote: state.partnerNote,
     myNote: state.myNote,
@@ -410,6 +444,24 @@ export function saveState(options = { pushCloud: true }) {
     return true;
   } catch {
     return false;
+  }
+}
+
+export function setMyPresence(isOnline) {
+  const myRole = getDeviceRole();
+  if (!myRole) return;
+  const active = Boolean(isOnline) && document.visibilityState === "visible";
+  const currentProfile = state.userProfiles?.[myRole] || {};
+  const wasOnline = Boolean(currentProfile.online);
+
+  writeMyProfileChanges({
+    online: active,
+    lastSeen: `Bugün ${nowTime()}`,
+    lastSeenAt: Date.now()
+  });
+
+  if (wasOnline !== active || active) {
+    saveState({ pushCloud: true });
   }
 }
 
@@ -529,7 +581,7 @@ export function calculateDistanceKm(lat1, lon1, lat2, lon2) {
 }
 
 export function getMapsUrl(lat, lon) {
-  return `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
+  return `https://www.google.com/maps?q=${Number(lat).toFixed(6)},${Number(lon).toFixed(6)}`;
 }
 
 export function showToast(containerId, message) {
@@ -598,7 +650,7 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
   let mouseOriginX = 0;
   let mouseOriginY = 0;
 
-  let touchMode = "none"; // "none" | "pan" | "pinch"
+  let touchMode = "none";
   let touchMoved = false;
   let pinchStartDist = 0;
   let pinchStartScale = 1;
@@ -745,8 +797,8 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
       panY = 0;
       return;
     }
-    const maxPanX = Math.max(180, ((scale - 1) * (stageEl?.clientWidth || 360)) * 0.85);
-    const maxPanY = Math.max(180, ((scale - 1) * (stageEl?.clientHeight || 500)) * 0.85);
+    const maxPanX = Math.max(180, (scale - 1) * (stageEl?.clientWidth || 360) * 0.85);
+    const maxPanY = Math.max(180, (scale - 1) * (stageEl?.clientHeight || 500) * 0.85);
     panX = Math.min(maxPanX, Math.max(-maxPanX, panX));
     panY = Math.min(maxPanY, Math.max(-maxPanY, panY));
   };
@@ -817,7 +869,6 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
     }
   };
 
-  // PC: Fare basılı tutarak sağa/sola/yukarı/aşağı kaydırma
   const onMouseMove = (e) => {
     if (!mouseDragging) return;
     const dx = e.clientX - mouseStartX;
@@ -874,7 +925,6 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
     setZoom(scale > 1 ? 1 : 2);
   });
 
-  // Mobil: 2 parmak pinch-to-zoom + 1 parmak sağ/sol/yukarı/aşağı kaydırma
   const getTouchesDist = (touches) =>
     Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY);
 
@@ -961,7 +1011,6 @@ export function openGalleryLightbox(items = [], startIndex = 0) {
     }
   });
 
-  // PC: Fare tekerleği ile yakınlaştırma / uzaklaştırma
   stageEl?.addEventListener(
     "wheel",
     (e) => {
