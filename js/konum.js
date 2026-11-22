@@ -336,24 +336,26 @@ export function renderKonum(containerEl, notice = null) {
   const hasBothCoords = Boolean(myCoords && partnerCoords);
   const computedKm = hasBothCoords
     ? Number(calculateDistanceKm(myCoords, partnerCoords).toFixed(1))
-    : Number(state.distanceKm || 0);
+    : 0;
 
-  if (hasBothCoords) {
-    state.distanceKm = computedKm;
-  }
+  state.distanceKm = computedKm;
 
-  const distanceLabel = formatDistanceText(computedKm);
+  const distanceLabel = hasBothCoords ? formatDistanceText(computedKm) : "0.0 km";
   const progressPercent = calculateProgressPercent(computedKm, hasBothCoords);
 
   const myAddress =
     mine?.address || mine?.label || (myCoords ? `${myCoords.lat}, ${myCoords.lng}` : "Henüz paylaşılmadı");
-  const myTime = mine?.updatedAt ? `Güncel: ${mine.updatedAt}` : "Henüz güncellenmedi";
+  const myTime =
+    myCoords || mine?.address ? `Güncel: ${mine?.updatedAt || nowTime()}` : "Henüz güncellenmedi";
 
   const partnerAddress =
     partner?.address ||
     partner?.label ||
     (partnerCoords ? `${partnerCoords.lat}, ${partnerCoords.lng}` : "Henüz paylaşılmadı");
-  const partnerTime = partner?.updatedAt ? `Güncel: ${partner.updatedAt}` : "Henüz güncellenmedi";
+  const partnerTime =
+    partnerCoords || partner?.address
+      ? `Güncel: ${partner?.updatedAt || nowTime()}`
+      : "Henüz güncellenmedi";
 
   const myMapHref = createMapsLink(myCoords);
   const partnerMapHref = createMapsLink(partnerCoords);
@@ -488,7 +490,7 @@ export function renderKonum(containerEl, notice = null) {
         );
       }
 
-      saveState({ pushCloud: true });
+      await saveState({ pushCloud: true });
       renderKonum(containerEl, {
         type: "ok",
         message: `Konum güncellendi: ${finalAddress}`
