@@ -1348,8 +1348,8 @@ export function renderSohbet(
     await saveState({ pushCloud: true, immediate: true });
     dispatchNotificationEvent({
       kind: "message",
-      title: `${senderName} ses kaydı gönderdi`,
-      body: "🎤 Yeni sesli mesaj"
+      title: `💬 ${senderName}`,
+      body: "🎤 Sesli mesaj gönderdi"
     });
     renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
   });
@@ -1547,7 +1547,6 @@ export function renderSohbet(
     micMuted = false;
     camOff = false;
 
-    const callLabel = mode === "video" ? "Görüntülü arama" : "Sesli arama";
     const senderName = state.myName || "Samet";
 
     await ensurePeerConnection(callId, myRole, partnerRole, mode);
@@ -1564,7 +1563,7 @@ export function renderSohbet(
 
     dispatchNotificationEvent({
       kind: mode === "video" ? "video_call" : "voice_call",
-      title: callLabel,
+      title: mode === "video" ? "📹 Görüntülü Arama" : "📞 Sesli Arama",
       body: `${senderName} seni ${mode === "video" ? "görüntülü" : "sesli"} arıyor...`,
       callId
     });
@@ -1694,7 +1693,7 @@ export function renderSohbet(
     const senderName = state.myName || "Samet";
     dispatchNotificationEvent({
       kind: "message",
-      title: `${senderName} mesaj gönderdi`,
+      title: `💬 ${senderName}`,
       body: hasPhoto ? (text ? `📷 ${text}` : "📷 Fotoğraf gönderdi") : text
     });
 
