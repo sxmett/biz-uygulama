@@ -1,4 +1,4 @@
-import { db, ref, set, onValue } from "./firebase.js";
+import { db, ref, set, onValue, off } from "./firebase.js";
 
 const STORAGE_KEY = "biz_app_state_v3";
 const LEGACY_KEYS = ["biz_app_state_v1", "biz_app_state_v2"];
@@ -117,6 +117,10 @@ export function getDeviceRole() {
   } catch {
     return null;
   }
+}
+
+export function isUserLoggedIn() {
+  return Boolean(getDeviceRole());
 }
 
 export function getPartnerRole(role = getDeviceRole()) {
@@ -302,6 +306,11 @@ export function clearDeviceRole() {
     localStorage.removeItem(DEVICE_ROLE_KEY);
   } catch {
     // Sessiz geç
+  }
+  state.callMode = null;
+  if (state.callTimer) {
+    clearInterval(state.callTimer);
+    state.callTimer = null;
   }
   syncRoleViewFields();
   state.messages = normalizeMessagesForRole(state.messages);
@@ -508,9 +517,16 @@ export function initCallSignalListener(onSignal) {
   callSignalListenerStarted = true;
 
   onValue(ref(db, CALL_SIGNAL_PATH), (snapshot) => {
+    if (!getDeviceRole()) return;
     const val = snapshot.val();
     onSignal?.(val || null);
   });
+}
+
+export function stopCallSignalListener() {
+  if (!callSignalListenerStarted) return;
+  off(ref(db, CALL_SIGNAL_PATH));
+  callSignalListenerStarted = false;
 }
 
 export function setMyPresence(isOnline) {
@@ -556,6 +572,7 @@ export function initRealtimeSync(onRemoteUpdate) {
 
   const roomRef = ref(db, SHARED_ROOM_PATH);
   onValue(roomRef, (snapshot) => {
+    const myRole = getDeviceRole();
     const val = snapshot.val();
     if (!val || typeof val !== "object") return;
 
@@ -563,7 +580,7 @@ export function initRealtimeSync(onRemoteUpdate) {
     applySharedSnapshot(val);
 
     let changed = false;
-    if (Array.isArray(state.messages)) {
+    if (myRole && Array.isArray(state.messages)) {
       state.messages.forEach((m) => {
         if (m.sender === "them" && m.status === "sent") {
           m.status = "delivered";
@@ -579,10 +596,12 @@ export function initRealtimeSync(onRemoteUpdate) {
     }
 
     suppressNextCloudPush = false;
-    if (changed) {
+    if (myRole && changed) {
       saveState({ pushCloud: true });
     }
-    onRemoteUpdate?.();
+    if (myRole) {
+      onRemoteUpdate?.();
+    }
   });
 }
 
@@ -657,12 +676,14 @@ export function showToast(containerId, message) {
 }
 
 export async function requestNotificationPermissionSafe() {
+  if (!getDeviceRole()) return "denied";
   try {
     if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      await Notification.requestPermission();
+      return await Notification.requestPermission();
     }
+    return typeof Notification !== "undefined" ? Notification.permission : "denied";
   } catch {
-    // Sessiz geç
+    return "denied";
   }
 }
 
@@ -702,7 +723,7 @@ export async function requestMediaPermissionSafe(mode = "voice") {
 
   const constraints =
     mode === "video"
-      ? { audio: audioConstraints, video: { facingMode: "user" } }
+      ? { audio: audioConstraints, video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } } }
       : { audio: audioConstraints, video: false };
 
   try {
