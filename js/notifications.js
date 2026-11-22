@@ -1,7 +1,20 @@
-import { getDeviceRole, requestNotificationPermissionSafe } from "./state.js";
+import {
+  db,
+  ref,
+  set,
+  push,
+  getMessaging,
+  getToken,
+  onMessage
+} from "./firebase.js";
+import {
+  getDeviceRole,
+  getPartnerRole,
+  requestNotificationPermissionSafe
+} from "./state.js";
 
-const SW_REGISTRATION_TIMEOUT_MS = 3500;
-const PUSH_SERVER_ENDPOINT = "/api/push/send";
+const SW_REGISTRATION_TIMEOUT_MS = 4000;
+const VAPID_PUBLIC_KEY = "BPkDBt0hY4a7NfX8i-anz8C9Lc6F_jv1kNya-5kGI1n982zn09LQnZabrHqZXJArosWpCeNWIVp8vq6C5YsXQXg";
 
 let activeAlertCallback = null;
 let pushSetupDone = false;
@@ -125,64 +138,67 @@ export function showInAppAlertBanner({ title, body, kind = "message", onOpen }) 
   }, 6500);
 }
 
-async function triggerSystemNotification({ title, body, tag, data }) {
-  if (!getDeviceRole()) return;
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+async function registerSwAndSaveToken() {
+  const myRole = getDeviceRole();
+  if (!myRole || !isSecurePushContext() || !("serviceWorker" in navigator)) {
     return;
   }
 
   try {
-    if ("serviceWorker" in navigator) {
-      const reg = await withTimeout(
-        navigator.serviceWorker.getRegistration(),
-        SW_REGISTRATION_TIMEOUT_MS,
-        null
-      );
-      if (reg && typeof reg.showNotification === "function") {
-        await reg.showNotification(title, {
-          body,
-          tag: tag || "biz-app-alert",
-          renotify: true,
-          data: data || {}
-        });
-        return;
-      }
-    }
-  } catch {
-    // Fallback olarak doğrudan Notification API kullan
-  }
+    const reg = await withTimeout(
+      navigator.serviceWorker.register("./sw.js", { scope: "./" }),
+      SW_REGISTRATION_TIMEOUT_MS,
+      null
+    );
+    if (!reg) return;
 
-  try {
-    const n = new Notification(title, {
-      body,
-      tag: tag || "biz-app-alert"
-    });
-    n.onclick = () => {
-      window.focus();
-      if (typeof activeAlertCallback === "function") {
-        activeAlertCallback(data || {});
-      }
-      n.close();
-    };
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+      return;
+    }
+
+    const messaging = getMessaging();
+    if (!messaging || !VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.startsWith("BURAYA_")) {
+      return;
+    }
+
+    const token = await withTimeout(
+      getToken(messaging, {
+        vapidKey: VAPID_PUBLIC_KEY,
+        serviceWorkerRegistration: reg
+      }),
+      SW_REGISTRATION_TIMEOUT_MS,
+      null
+    );
+
+    if (token) {
+      await set(ref(db, `biz_room/push_tokens/${myRole}`), {
+        token,
+        updatedAt: Date.now()
+      });
+    }
   } catch {
     // Sessiz geç
   }
 }
 
-async function sendBackgroundPushToServer(payload) {
-  if (!getDeviceRole()) return;
+async function enqueuePushToPartner(payload) {
+  const myRole = getDeviceRole();
+  if (!myRole) return;
+  const targetRole = getPartnerRole(myRole);
+
   try {
-    await withTimeout(
-      fetch(PUSH_SERVER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      }),
-      2500,
-      null
-    );
+    const queueRef = push(ref(db, "biz_room/push_queue"));
+    await set(queueRef, {
+      targetRole,
+      fromRole: myRole,
+      kind: payload.kind || "message",
+      title: payload.title || "Yeni Bildirim",
+      body: payload.body || "",
+      callId: payload.callId || "",
+      createdAt: Date.now()
+    });
   } catch {
-    // Sunucu endpointi yoksa sessiz geç
+    // Sessiz geç
   }
 }
 
@@ -197,7 +213,8 @@ export function dispatchNotificationEvent({ kind = "message", title, body, callI
     ts: Date.now()
   };
 
-  sendBackgroundPushToServer(payload);
+  // Worker'ın dinlediği kuyruğa push isteği gönder
+  enqueuePushToPartner(payload);
 
   const appVisible = document.visibilityState === "visible" && document.hasFocus();
   if (appVisible) {
@@ -211,13 +228,6 @@ export function dispatchNotificationEvent({ kind = "message", title, body, callI
         }
       }
     });
-  } else {
-    triggerSystemNotification({
-      title,
-      body,
-      tag: kind === "message" ? "biz-chat-msg" : `biz-call-${callId || Date.now()}`,
-      data: payload
-    });
   }
 }
 
@@ -225,23 +235,40 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
   activeAlertCallback = onIncomingAlert || null;
   if (!getDeviceRole()) return;
 
-  if (!pushSetupDone) {
-    pushSetupDone = true;
-
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.addEventListener("message", (event) => {
-        if (!getDeviceRole()) return;
-        const msg = event.data;
-        if (msg && msg.type === "PUSH_CLICK" && typeof activeAlertCallback === "function") {
-          activeAlertCallback(msg.payload || {});
-        }
-      });
-    }
-  }
-
   if (isSecurePushContext() && typeof Notification !== "undefined") {
     if (Notification.permission === "default") {
       await requestNotificationPermissionSafe();
+    }
+  }
+
+  await registerSwAndSaveToken();
+
+  if (!pushSetupDone) {
+    pushSetupDone = true;
+
+    try {
+      const messaging = getMessaging();
+      onMessage(messaging, (payload) => {
+        if (!getDeviceRole()) return;
+        const data = payload.data || {};
+        const notif = payload.notification || {};
+        const title = data.title || notif.title || "Yeni Bildirim";
+        const body = data.body || notif.body || "";
+        const kind = data.kind || "message";
+
+        showInAppAlertBanner({
+          title,
+          body,
+          kind,
+          onOpen: () => {
+            if (typeof activeAlertCallback === "function") {
+              activeAlertCallback({ kind, title, body, callId: data.callId || "" });
+            }
+          }
+        });
+      });
+    } catch {
+      // Sessiz geç
     }
   }
 }
