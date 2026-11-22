@@ -49,6 +49,32 @@ let peerModalOpen = false;
 let peerModalTab = "search";
 let peerSearchQuery = "";
 
+function getPresenceMeta() {
+  if (isPartnerTyping()) {
+    return {
+      text: "Yazıyor...",
+      className: "peer-presence-text typing"
+    };
+  }
+
+  if (state.partnerOnline) {
+    return {
+      text: "Çevrimiçi",
+      className: "peer-presence-text online"
+    };
+  }
+
+  const lastSeenText =
+    state.partnerLastSeen && state.partnerLastSeen !== "Henüz görülmedi"
+      ? `Son görülme: ${state.partnerLastSeen}`
+      : "Çevrimdışı";
+
+  return {
+    text: lastSeenText,
+    className: "peer-presence-text"
+  };
+}
+
 export function markIncomingMessagesAsRead() {
   let updated = false;
   state.messages.forEach((msg) => {
@@ -183,7 +209,7 @@ function blobToDataUrl(blob) {
 }
 
 function getSenderLabel(sender) {
-  return sender === "me" ? state.myName || "Sen" : state.partnerName || "Partner";
+  return sender === "me" ? state.myName || "Samet" : state.partnerName || "Emine";
 }
 
 function getMessagePreviewText(msg) {
@@ -217,7 +243,7 @@ function renderReceipt(msg) {
 
   if (msg.status === "read") {
     return `
-      <svg class="tick-svg read" style="color:#34b7f1;" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" title="Görüldü">
+      <svg class="tick-svg read" style="color:#38bdf8;" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" title="Okundu">
         <path d="M2 8.5L6.5 13L15 3.5" />
         <path d="M8.5 8.5L13 13L21.5 3.5" />
       </svg>
@@ -357,7 +383,7 @@ function handlePeerModalEsc(e) {
 function renderPeerInfoModal(contentEl) {
   if (!peerModalOpen) return;
 
-  const partnerLabel = state.partnerName || "Partner";
+  const partnerLabel = state.partnerName || "Emine";
   const bodyHtml =
     peerModalTab === "search"
       ? `
@@ -469,7 +495,8 @@ export function renderSohbet(
   const prevPanel = document.getElementById("messages-panel");
   const prevScrollTop = prevPanel ? prevPanel.scrollTop : 0;
 
-  const partnerLabel = state.partnerName || "Partner";
+  const partnerLabel = state.partnerName || "Emine";
+  const presence = getPresenceMeta();
 
   const messagesHtml =
     state.messages.length > 0
@@ -540,8 +567,8 @@ export function renderSohbet(
       : `
         <div class="card" style="margin:auto;text-align:center;max-width:320px;">
           <div class="label" style="margin-bottom:6px;">Sohbet Hazır</div>
-          <strong>${partnerLabel} ile özel alanın açıldı</strong>
-          <p class="muted-note" style="margin-top:6px;">Henüz mesaj yok. İlk mesajını göndererek sohbete başlayabilirsin.</p>
+          <strong>${partnerLabel} ile sohbetin hazır</strong>
+          <p class="muted-note" style="margin-top:6px;">İlk mesajını göndererek sohbete başlayabilirsin.</p>
         </div>
       `;
 
@@ -565,9 +592,6 @@ export function renderSohbet(
   const isRinging = state.callMode && callPhase === "ringing";
   const isConnected = state.callMode && callPhase === "connected";
   const isIncomingCall = isRinging && callDirection === "incoming";
-  const subStatusText = isPartnerTyping()
-    ? "yazıyor..."
-    : `${state.partnerMood || "Çevrimiçi"} · ${Number(state.distanceKm).toFixed(1)} km`;
   const callKindText = state.callMode === "video" ? "görüntülü" : "sesli";
 
   const incomingCardHtml = isIncomingCall
@@ -676,16 +700,21 @@ export function renderSohbet(
     `
     : "";
 
+  const avatarInitial = (partnerLabel || "E").trim()[0]?.toUpperCase() || "E";
+  const avatarHtml = state.partnerAvatar
+    ? `<div class="avatar-circle"><img src="${state.partnerAvatar}" alt="${partnerLabel}" /></div>`
+    : `<div class="avatar-circle">${avatarInitial}</div>`;
+
   contentEl.innerHTML = `
     <div class="chat-layout">
       ${incomingCardHtml}
 
       <div class="chat-top-card">
         <div class="chat-peer">
-          <div class="avatar-circle">${partnerLabel[0]}</div>
+          ${avatarHtml}
           <div>
             <span class="peer-name-trigger" id="open-peer-sheet-btn">${partnerLabel}</span>
-            <div class="peer-sub" id="peer-live-sub">${subStatusText}</div>
+            <div class="${presence.className}" id="peer-live-sub">${presence.text}</div>
           </div>
         </div>
         <div class="call-actions">
@@ -720,7 +749,7 @@ export function renderSohbet(
 
         <div class="composer-tools">
           <label class="tool-btn" style="cursor:pointer;">
-            Fotoğraf Seç
+            Fotoğraf
             <input type="file" id="photo-input" accept="image/*" hidden />
           </label>
           <button type="button" class="tool-btn" id="record-btn">Ses Kaydet</button>
@@ -755,8 +784,13 @@ export function renderSohbet(
     setMyTypingStatus(hasText);
     clearTimeout(typingStopTimeout);
     if (hasText) {
-      typingStopTimeout = setTimeout(() => setMyTypingStatus(false), 1500);
+      typingStopTimeout = setTimeout(() => setMyTypingStatus(false), 1600);
     }
+  });
+
+  inputEl.addEventListener("blur", () => {
+    clearTimeout(typingStopTimeout);
+    setMyTypingStatus(false);
   });
 
   const panel = document.getElementById("messages-panel");
@@ -930,7 +964,7 @@ export function renderSohbet(
       state.callMode = null;
       callErrorMsg =
         mediaRes.reason === "unsupported"
-          ? "Bu tarayıcıda ses/görüntü araması desteklenmiyor."
+          ? "Bu cihazda ses/görüntü araması desteklenmiyor."
           : mode === "video"
           ? "Kamera veya mikrofon izni verilmedi."
           : "Mikrofon izni verilmedi.";
@@ -948,7 +982,7 @@ export function renderSohbet(
     camOff = false;
 
     const callLabel = mode === "video" ? "Görüntülü arama" : "Sesli arama";
-    const senderName = state.myName || "Partner";
+    const senderName = state.myName || "Samet";
     const callId = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     addSystemCallNotice(`${callLabel} · Arıyor...`);
@@ -1055,7 +1089,7 @@ export function renderSohbet(
 
       if (blob.size > 0) {
         const audioDataUrl = await blobToDataUrl(blob);
-        const senderName = state.myName || "Partner";
+        const senderName = state.myName || "Samet";
         state.messages.push({
           id: Date.now() + Math.floor(Math.random() * 100),
           sender: "me",
@@ -1080,7 +1114,7 @@ export function renderSohbet(
     };
 
     recorder.start();
-    if (recordStatus) recordStatus.textContent = "Kaydediliyor... (Bitirmek için tekrar bas)";
+    if (recordStatus) recordStatus.textContent = "Kaydediliyor...";
     recordBtn.textContent = "Kaydı Durdur";
   });
 
@@ -1113,7 +1147,7 @@ export function renderSohbet(
 
     saveState({ pushCloud: true });
 
-    const senderName = state.myName || "Partner";
+    const senderName = state.myName || "Samet";
     dispatchNotificationEvent({
       kind: "message",
       title: `${senderName} mesaj gönderdi`,
