@@ -1,4 +1,4 @@
-import { state, saveState, getDeviceRole, nowTime } from "./state.js";
+import { state, saveState, getDeviceRole, nowTime, writeMyProfileChanges } from "./state.js";
 
 const LOCAL_CACHE_KEY = "biz_konum_cache_v1";
 
@@ -19,7 +19,7 @@ function writeCachedLocation(role, record) {
     current[role] = record;
     localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(current));
   } catch {
-    // Depolama hatası yoksayılır
+    // Sessiz geç
   }
 }
 
@@ -47,7 +47,7 @@ function formatDistanceText(km) {
 }
 
 function calculateProgressPercent(km, hasBoth) {
-  if (!hasBoth || typeof km !== "number" || !Number.isFinite(km)) return 18;
+  if (!hasBoth || typeof km !== "number" || !Number.isFinite(km)) return 15;
   if (km <= 0.2) return 100;
   if (km >= 100) return 20;
   return Math.max(20, Math.min(96, Math.round(100 - (km / 100) * 76)));
@@ -56,7 +56,7 @@ function calculateProgressPercent(km, hasBoth) {
 function extractCoords(entry) {
   if (!entry || typeof entry !== "object") return null;
   const lat = Number(entry.lat);
-  const lng = Number(entry.lng);
+  const lng = Number(entry.lng ?? entry.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (lat === 0 && lng === 0) return null;
   return { lat, lng };
@@ -82,18 +82,14 @@ function getPairLocations() {
   const cache = readCachedLocations();
 
   const mine = pickNewestRecord(
+    state.userProfiles?.[role]?.location,
     state.myLocation,
-    state.locations?.[role],
-    state.sharedLocations?.[role],
-    role === "userA" ? state.userALocation : state.userBLocation,
     cache[role]
   );
 
   const partner = pickNewestRecord(
+    state.userProfiles?.[partnerRole]?.location,
     state.partnerLocation,
-    state.locations?.[partnerRole],
-    state.sharedLocations?.[partnerRole],
-    role === "userA" ? state.userBLocation : state.userALocation,
     cache[partnerRole]
   );
 
@@ -101,25 +97,14 @@ function getPairLocations() {
 }
 
 function saveMineLocation(role, nextData) {
-  state.myLocation = nextData;
+  const normalized = {
+    ...nextData,
+    lon: nextData.lng
+  };
 
-  if (!state.locations || typeof state.locations !== "object") {
-    state.locations = {};
-  }
-  state.locations[role] = nextData;
-
-  if (!state.sharedLocations || typeof state.sharedLocations !== "object") {
-    state.sharedLocations = {};
-  }
-  state.sharedLocations[role] = nextData;
-
-  if (role === "userA") {
-    state.userALocation = nextData;
-  } else {
-    state.userBLocation = nextData;
-  }
-
-  writeCachedLocation(role, nextData);
+  writeMyProfileChanges({ location: normalized });
+  state.myLocation = normalized;
+  writeCachedLocation(role, normalized);
 }
 
 async function resolveAddressFromCoords(lat, lng) {
@@ -130,7 +115,7 @@ async function resolveAddressFromCoords(lat, lng) {
     const endpoint =
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
       `&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}` +
-      `&zoom=16&addressdetails=1&accept-language=tr`;
+      `&zoom=17&addressdetails=1&accept-language=tr`;
 
     const response = await fetch(endpoint, {
       signal: controller.signal,
@@ -175,7 +160,11 @@ async function resolveAddressFromCoords(lat, lng) {
     }
 
     if (typeof json?.display_name === "string" && json.display_name.trim()) {
-      return json.display_name.split(",").slice(0, 3).map((s) => s.trim()).join(", ");
+      return json.display_name
+        .split(",")
+        .slice(0, 3)
+        .map((s) => s.trim())
+        .join(", ");
     }
 
     return null;
@@ -268,12 +257,12 @@ async function fetchCurrentPosition() {
       try {
         await runWithTimeout(capGeo.requestPermissions(), 6000);
       } catch {
-        // İzin kontrolü devam edecek
+        // Devam et
       }
     }
     try {
       const result = await runWithTimeout(
-        capGeo.getCurrentPosition({ enableHighAccuracy: false, timeout: 10000 }),
+        capGeo.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 }),
         11000
       );
       if (result?.coords && Number.isFinite(Number(result.coords.latitude))) {
@@ -320,28 +309,25 @@ async function fetchCurrentPosition() {
 
 function getFriendlyError(err) {
   if (err?.code === 1) {
-    return "Konum izni kapalı. Uygulama izinlerinden Konum iznini açıp tekrar dene.";
+    return "Konum izni kapalı. Konum iznini açıp tekrar dene.";
   }
   if (err?.code === 2) {
     return "Konum sinyali alınamadı. Telefonun Konum (GPS) servisinin açık olduğundan emin ol.";
   }
   if (err?.code === 3) {
-    return "Konum alma süresi doldu. Konum servisini açıp tekrar dene.";
+    return "Konum alma süresi doldu. Tekrar dene.";
   }
   return err?.message || "Konum alınamadı. Konum iznini ve GPS servisini kontrol et.";
 }
 
-function createMapsLink(coords, addressLabel) {
-  if (!coords) return "#";
-  const query = encodeURIComponent(
-    addressLabel ? `${coords.lat},${coords.lng} (${addressLabel})` : `${coords.lat},${coords.lng}`
-  );
-  return `https://www.google.com/maps/search/?api=1&query=${query}`;
+function createMapsLink(coords) {
+  if (!coords) return "";
+  return `https://www.google.com/maps?q=${coords.lat.toFixed(6)},${coords.lng.toFixed(6)}`;
 }
 
 export function renderKonum(containerEl, notice = null) {
-  const myTitle = state.myName || "Sen";
-  const partnerTitle = state.partnerName || "Sevgilim";
+  const myTitle = state.myName || "Samet";
+  const partnerTitle = state.partnerName || "Emine";
 
   const { role, mine, partner } = getPairLocations();
   const myCoords = extractCoords(mine);
@@ -369,8 +355,8 @@ export function renderKonum(containerEl, notice = null) {
     (partnerCoords ? `${partnerCoords.lat}, ${partnerCoords.lng}` : "Henüz paylaşılmadı");
   const partnerTime = partner?.updatedAt ? `Güncel: ${partner.updatedAt}` : "Henüz güncellenmedi";
 
-  const myMapHref = createMapsLink(myCoords, myAddress);
-  const partnerMapHref = createMapsLink(partnerCoords, partnerAddress);
+  const myMapHref = createMapsLink(myCoords);
+  const partnerMapHref = createMapsLink(partnerCoords);
 
   const statusText = hasBothCoords
     ? `${myTitle} ve ${partnerTitle} arası ${distanceLabel}`
@@ -384,7 +370,7 @@ export function renderKonum(containerEl, notice = null) {
     <div class="konum-page">
       <section class="distance-banner">
         <div class="distance-banner-head">
-          <span class="distance-title">ARAMIZDAKİ MESAFE</span>
+          <span class="distance-title">Aramızdaki Mesafe</span>
           <span class="distance-value-pill">${distanceLabel}</span>
         </div>
 
@@ -413,19 +399,18 @@ export function renderKonum(containerEl, notice = null) {
         <div class="loc-coords-box">
           ${
             myCoords
-              ? `Koordinatlar: ${myCoords.lat}, ${myCoords.lng}`
+              ? `Koordinatlar: ${myCoords.lat.toFixed(6)}, ${myCoords.lng.toFixed(6)}`
               : "Koordinatlar: Henüz alınmadı"
           }
         </div>
 
         <div class="loc-btn-row">
-          <button type="button" class="loc-primary-btn" id="btn-fetch-location">Konumumu Al</button>
-          <a
-            href="${myMapHref}"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="loc-map-btn ${myCoords ? "" : "loc-map-btn--disabled"}"
-          >Haritada Aç</a>
+          <button type="button" class="loc-primary-btn" id="btn-fetch-location">Konumu Al</button>
+          ${
+            myMapHref
+              ? `<a href="${myMapHref}" target="_blank" rel="noopener noreferrer" class="loc-map-btn">Haritada Aç</a>`
+              : `<span class="loc-map-btn loc-map-btn--disabled">Haritada Aç</span>`
+          }
           <span id="loc-live-status" class="muted-note"></span>
         </div>
 
@@ -452,18 +437,17 @@ export function renderKonum(containerEl, notice = null) {
         <div class="loc-coords-box">
           ${
             partnerCoords
-              ? `Koordinatlar: ${partnerCoords.lat}, ${partnerCoords.lng}`
+              ? `Koordinatlar: ${partnerCoords.lat.toFixed(6)}, ${partnerCoords.lng.toFixed(6)}`
               : "Koordinatlar: Henüz alınmadı"
           }
         </div>
 
         <div class="loc-btn-row">
-          <a
-            href="${partnerMapHref}"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="loc-map-btn ${partnerCoords ? "" : "loc-map-btn--disabled"}"
-          >Haritada Aç</a>
+          ${
+            partnerMapHref
+              ? `<a href="${partnerMapHref}" target="_blank" rel="noopener noreferrer" class="loc-map-btn">Haritada Aç</a>`
+              : `<span class="loc-map-btn loc-map-btn--disabled">Haritada Aç</span>`
+          }
           <span class="muted-note">Mesafe: ${distanceLabel}</span>
         </div>
       </section>
@@ -480,7 +464,7 @@ export function renderKonum(containerEl, notice = null) {
     try {
       const { lat, lng } = await fetchCurrentPosition();
       const resolvedAddress = await resolveAddressFromCoords(lat, lng);
-      const finalAddress = resolvedAddress || `${lat}, ${lng}`;
+      const finalAddress = resolvedAddress || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 
       const nextRecord = {
         ...(mine || {}),
@@ -489,6 +473,7 @@ export function renderKonum(containerEl, notice = null) {
         label: finalAddress,
         lat,
         lng,
+        lon: lng,
         ts: Date.now(),
         updatedAt: nowTime()
       };
