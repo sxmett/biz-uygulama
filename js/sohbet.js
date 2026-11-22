@@ -50,8 +50,8 @@ let addedCandidateIds = new Set();
 let offerCreatedForCall = "";
 let answerCreatedForCall = "";
 
-let callPhase = null; // "ringing" | "connected"
-let callDirection = null; // "outgoing" | "incoming"
+let callPhase = null;
+let callDirection = null;
 let currentCallId = null;
 let activeCallMode = null;
 let ringSecondsLeft = RING_TIMEOUT_SECONDS;
@@ -61,14 +61,12 @@ let micMuted = false;
 let camOff = false;
 let callErrorMsg = "";
 let replyingToMsgId = null;
+let typingDebounceTimeout = null;
 let typingStopTimeout = null;
 let handledSignalKey = "";
 let activeAudioPlayer = null;
 let activeAudioBtn = null;
-
-// Ses kaydı önizleme taslağı (kaydı durdurunca direkt göndermez)
-let pendingAudioDraft = null; // { dataUrl, durationSec }
-
+let pendingAudioDraft = null;
 let peerModalOpen = false;
 let peerModalTab = "search";
 let peerSearchQuery = "";
@@ -108,28 +106,16 @@ export function formatWhatsAppDateLabel(dateKey) {
 
 function getPresenceMeta() {
   if (isPartnerTyping()) {
-    return {
-      text: "Yazıyor...",
-      className: "peer-presence-text typing"
-    };
+    return { text: "Yazıyor...", className: "peer-presence-text typing" };
   }
-
   if (state.partnerOnline) {
-    return {
-      text: "Çevrimiçi",
-      className: "peer-presence-text online"
-    };
+    return { text: "Çevrimiçi", className: "peer-presence-text online" };
   }
-
   const lastSeenText =
     state.partnerLastSeen && state.partnerLastSeen !== "Henüz görülmedi"
       ? `Son görülme: ${state.partnerLastSeen}`
       : "Çevrimdışı";
-
-  return {
-    text: lastSeenText,
-    className: "peer-presence-text"
-  };
+  return { text: lastSeenText, className: "peer-presence-text" };
 }
 
 export function refreshChatHeaderPresenceOnly() {
@@ -187,7 +173,6 @@ function appendCallLogMessage(mode, seconds, status = "ended") {
       : status === "rejected"
       ? `${callLabel} · Reddedildi`
       : `${callLabel} · ${formatCallTime(seconds)} konuşuldu`;
-
   addSystemCallNotice(text);
 }
 
@@ -251,12 +236,10 @@ function attachMediaToCallScreen() {
     localVideo.srcObject =
       callStream && !camOff && activeCallMode === "video" ? callStream : null;
   }
-
   const remoteVideo = document.getElementById("wa-remote-video");
   if (remoteVideo && remoteStream) {
     remoteVideo.srcObject = remoteStream;
   }
-
   const remoteAudio = document.getElementById("wa-remote-audio");
   if (remoteAudio && remoteStream) {
     remoteAudio.srcObject = remoteStream;
@@ -711,7 +694,6 @@ function scrollToAndHighlightMessage(msgId) {
 
 function renderReceipt(msg) {
   if (msg.sender !== "me") return "";
-
   if (msg.status === "read") {
     return `
       <svg class="tick-svg read" style="color:#38bdf8;" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" title="Okundu">
@@ -720,7 +702,6 @@ function renderReceipt(msg) {
       </svg>
     `;
   }
-
   if (msg.status === "delivered") {
     return `
       <svg class="tick-svg delivered" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" title="İletildi">
@@ -729,7 +710,6 @@ function renderReceipt(msg) {
       </svg>
     `;
   }
-
   return `
     <svg class="tick-svg sent" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" title="Gönderildi">
       <path d="M3 8.5L7.5 13L17 3.5" />
@@ -780,11 +760,10 @@ function bindCustomAudioPlayers(container) {
     audioEl.addEventListener("ended", () => {
       playBtn.textContent = "▶";
       sliderEl.value = "0";
-      if (Number.isFinite(audioEl.duration) && audioEl.duration > 0) {
-        timeEl.textContent = formatCallTime(audioEl.duration);
-      } else {
-        timeEl.textContent = "00:00";
-      }
+      timeEl.textContent =
+        Number.isFinite(audioEl.duration) && audioEl.duration > 0
+          ? formatCallTime(audioEl.duration)
+          : "00:00";
     });
 
     playBtn.addEventListener("click", (e) => {
@@ -819,10 +798,7 @@ function bindCustomAudioPlayers(container) {
 
 function openChatPreviewOnly() {
   if (!state.pendingPhoto) return;
-  openGalleryLightbox(
-    [{ src: state.pendingPhoto, title: "Sohbet fotoğraf önizlemesi" }],
-    0
-  );
+  openGalleryLightbox([{ src: state.pendingPhoto, title: "Sohbet fotoğraf önizlemesi" }], 0);
 }
 
 function openSentChatPhotosGallery(clickedSrc) {
@@ -1082,7 +1058,7 @@ export function renderSohbet(
             if (msg.type === "text") {
               body = `<span>${msg.text}</span>`;
             } else if (msg.type === "image") {
-              body = `<img src="${msg.src}" alt="Gönderilen fotoğraf" class="msg-photo" style="cursor:pointer;" data-open-photo="${msg.src}" />${
+              body = `<img src="${msg.src}" alt="Gönderilen fotoğraf" class="msg-photo" loading="lazy" style="cursor:pointer;" data-open-photo="${msg.src}" />${
                 msg.text ? `<span>${msg.text}</span>` : ""
               }`;
             } else if (msg.type === "audio") {
@@ -1285,21 +1261,25 @@ export function renderSohbet(
 
   inputEl.addEventListener("input", () => {
     const hasText = inputEl.value.trim().length > 0;
-    setMyTypingStatus(hasText);
+    clearTimeout(typingDebounceTimeout);
     clearTimeout(typingStopTimeout);
-    if (hasText) {
-      typingStopTimeout = setTimeout(() => setMyTypingStatus(false), 3200);
-    }
+    typingDebounceTimeout = setTimeout(() => {
+      setMyTypingStatus(hasText);
+      if (hasText) {
+        typingStopTimeout = setTimeout(() => setMyTypingStatus(false), 3500);
+      }
+    }, 350);
   });
 
   inputEl.addEventListener("blur", () => {
+    clearTimeout(typingDebounceTimeout);
     clearTimeout(typingStopTimeout);
     setTimeout(() => {
       const cur = document.getElementById("msg-input");
       if (!cur || !cur.value.trim()) {
         setMyTypingStatus(false);
       }
-    }, 1500);
+    }, 800);
   });
 
   const panel = document.getElementById("messages-panel");
@@ -1362,9 +1342,10 @@ export function renderSohbet(
     });
     pendingAudioDraft = null;
     replyingToMsgId = null;
+    clearTimeout(typingDebounceTimeout);
     clearTimeout(typingStopTimeout);
     setMyTypingStatus(false);
-    await saveState({ pushCloud: true });
+    await saveState({ pushCloud: true, immediate: true });
     dispatchNotificationEvent({
       kind: "message",
       title: `${senderName} ses kaydı gönderdi`,
@@ -1523,8 +1504,6 @@ export function renderSohbet(
       const em = emBtn.dataset.emoji;
       input.value = input.value.slice(0, start) + em + input.value.slice(end);
       setMyTypingStatus(input.value.trim().length > 0);
-      clearTimeout(typingStopTimeout);
-      typingStopTimeout = setTimeout(() => setMyTypingStatus(false), 3200);
       input.focus();
       input.setSelectionRange(start + em.length, start + em.length);
     });
@@ -1667,6 +1646,7 @@ export function renderSohbet(
         pendingAudioDraft = { dataUrl: audioDataUrl };
       }
 
+      clearTimeout(typingDebounceTimeout);
       clearTimeout(typingStopTimeout);
       setMyTypingStatus(false);
       renderSohbet(contentEl, true, { scrollToBottom: false, preserveScroll: true });
@@ -1701,6 +1681,7 @@ export function renderSohbet(
       replyTo: buildReplyPayload(activeReplyMsg)
     };
 
+    clearTimeout(typingDebounceTimeout);
     clearTimeout(typingStopTimeout);
     state.messages.push(newMsg);
     state.pendingPhoto = null;
@@ -1708,7 +1689,7 @@ export function renderSohbet(
     if (currentInput) currentInput.value = "";
     setMyTypingStatus(false);
 
-    await saveState({ pushCloud: true });
+    await saveState({ pushCloud: true, immediate: true });
 
     const senderName = state.myName || "Samet";
     dispatchNotificationEvent({
