@@ -36,11 +36,24 @@ const EMOJIS = [
 
 const QUICK_REACTIONS = ["❤️", "😂", "😍", "🥺", "🔥"];
 const RING_TIMEOUT_SECONDS = 60;
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" }
+  ]
+};
 
 let callStream = null;
-let callPhase = null;
-let callDirection = null;
+let remoteStream = null;
+let pc = null;
+let addedCandidateIds = new Set();
+let offerCreatedForCall = "";
+let answerCreatedForCall = "";
+
+let callPhase = null; // "ringing" | "connected"
+let callDirection = null; // "outgoing" | "incoming"
 let currentCallId = null;
+let activeCallMode = null;
 let ringSecondsLeft = RING_TIMEOUT_SECONDS;
 let ringTimer = null;
 let isStartingCall = false;
@@ -53,11 +66,14 @@ let handledSignalKey = "";
 let activeAudioPlayer = null;
 let activeAudioBtn = null;
 
+// Ses kaydı önizleme taslağı (kaydı durdurunca direkt göndermez)
+let pendingAudioDraft = null; // { dataUrl, durationSec }
+
 let peerModalOpen = false;
 let peerModalTab = "search";
 let peerSearchQuery = "";
 
-function formatWhatsAppDateLabel(dateKey) {
+export function formatWhatsAppDateLabel(dateKey) {
   const safeKey = dateKey || getLocalDayKey();
   const [yStr, mStr, dStr] = safeKey.split("-");
   const year = Number(yStr);
@@ -68,8 +84,7 @@ function formatWhatsAppDateLabel(dateKey) {
 
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const targetStart = targetDate.getTime();
-  const diffDays = Math.round((todayStart - targetStart) / 86400000);
+  const diffDays = Math.round((todayStart - targetDate.getTime()) / 86400000);
 
   if (diffDays <= 0) return "Bugün";
   if (diffDays === 1) return "Dün";
@@ -126,6 +141,7 @@ export function refreshChatHeaderPresenceOnly() {
 }
 
 export function markIncomingMessagesAsRead() {
+  if (!getDeviceRole()) return;
   let updated = false;
   state.messages.forEach((msg) => {
     if (msg.sender === "them" && msg.status !== "read") {
@@ -146,11 +162,12 @@ function formatCallTime(totalSec) {
 }
 
 function addSystemCallNotice(text) {
+  if (!getDeviceRole()) return;
   const now = Date.now();
   state.messages.push({
     id: now + Math.floor(Math.random() * 100),
     sender: "me",
-    authorRole: getDeviceRole() || "userA",
+    authorRole: getDeviceRole(),
     type: "call",
     text,
     time: nowTime(),
@@ -188,9 +205,30 @@ function stopConversationTimerOnly() {
   }
 }
 
+function closePeerConnection() {
+  if (pc) {
+    try {
+      pc.ontrack = null;
+      pc.onicecandidate = null;
+      pc.close();
+    } catch {
+      // Sessiz geç
+    }
+    pc = null;
+  }
+  if (remoteStream) {
+    remoteStream.getTracks().forEach((t) => t.stop());
+    remoteStream = null;
+  }
+  addedCandidateIds.clear();
+  offerCreatedForCall = "";
+  answerCreatedForCall = "";
+}
+
 function stopCallMediaAndTimers() {
   stopRingTimerOnly();
   stopConversationTimerOnly();
+  closePeerConnection();
   if (callStream) {
     callStream.getTracks().forEach((track) => track.stop());
     callStream = null;
@@ -200,8 +238,139 @@ function stopCallMediaAndTimers() {
   callPhase = null;
   callDirection = null;
   currentCallId = null;
+  activeCallMode = null;
+  state.callMode = null;
   micMuted = false;
   camOff = false;
+  document.getElementById("wa-call-screen-overlay")?.remove();
+}
+
+function attachMediaToCallScreen() {
+  const localVideo = document.getElementById("wa-local-video");
+  if (localVideo) {
+    localVideo.srcObject =
+      callStream && !camOff && activeCallMode === "video" ? callStream : null;
+  }
+
+  const remoteVideo = document.getElementById("wa-remote-video");
+  if (remoteVideo && remoteStream) {
+    remoteVideo.srcObject = remoteStream;
+  }
+
+  const remoteAudio = document.getElementById("wa-remote-audio");
+  if (remoteAudio && remoteStream) {
+    remoteAudio.srcObject = remoteStream;
+    remoteAudio.play().catch(() => {});
+  }
+}
+
+async function ensurePeerConnection(callId, myRole, partnerRole, mode) {
+  if (pc) return pc;
+
+  const conn = new RTCPeerConnection(RTC_CONFIG);
+  remoteStream = new MediaStream();
+
+  if (callStream) {
+    callStream.getTracks().forEach((track) => {
+      conn.addTrack(track, callStream);
+    });
+  }
+
+  conn.ontrack = (event) => {
+    if (event.streams && event.streams[0]) {
+      event.streams[0].getTracks().forEach((track) => {
+        if (!remoteStream.getTracks().some((existing) => existing.id === track.id)) {
+          remoteStream.addTrack(track);
+        }
+      });
+    } else if (event.track) {
+      remoteStream.addTrack(event.track);
+    }
+    attachMediaToCallScreen();
+  };
+
+  conn.onicecandidate = async (event) => {
+    if (!event.candidate || !getDeviceRole()) return;
+    const candidatePayload = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      fromRole: myRole,
+      candidate: event.candidate.toJSON()
+    };
+    await writeCallSignal({
+      callId,
+      callerRole: callDirection === "outgoing" ? myRole : partnerRole,
+      calleeRole: callDirection === "outgoing" ? partnerRole : myRole,
+      mode,
+      status: "accepted",
+      iceCandidate: candidatePayload,
+      updatedAt: Date.now()
+    });
+  };
+
+  pc = conn;
+  return conn;
+}
+
+async function createAndSendOffer(callId, myRole, partnerRole, mode) {
+  if (offerCreatedForCall === callId) return;
+  offerCreatedForCall = callId;
+  const conn = await ensurePeerConnection(callId, myRole, partnerRole, mode);
+  const offer = await conn.createOffer({
+    offerToReceiveAudio: true,
+    offerToReceiveVideo: mode === "video"
+  });
+  await conn.setLocalDescription(offer);
+  await writeCallSignal({
+    callId,
+    callerRole: myRole,
+    calleeRole: partnerRole,
+    mode,
+    status: "accepted",
+    sdpOffer: conn.localDescription.toJSON(),
+    updatedAt: Date.now()
+  });
+}
+
+async function handleRemoteSdpOffer(signal, myRole, partnerRole, mode) {
+  if (!signal?.sdpOffer || answerCreatedForCall === signal.callId) return;
+  answerCreatedForCall = signal.callId;
+  const conn = await ensurePeerConnection(signal.callId, myRole, partnerRole, mode);
+  await conn.setRemoteDescription(new RTCSessionDescription(signal.sdpOffer));
+  const answer = await conn.createAnswer();
+  await conn.setLocalDescription(answer);
+  await writeCallSignal({
+    callId: signal.callId,
+    callerRole: partnerRole,
+    calleeRole: myRole,
+    mode,
+    status: "accepted",
+    sdpAnswer: conn.localDescription.toJSON(),
+    updatedAt: Date.now()
+  });
+}
+
+async function handleRemoteSdpAnswer(signal) {
+  if (!signal?.sdpAnswer || !pc) return;
+  if (!pc.currentRemoteDescription) {
+    await pc.setRemoteDescription(new RTCSessionDescription(signal.sdpAnswer));
+  }
+}
+
+async function handleRemoteIceCandidate(signal) {
+  const candObj = signal?.iceCandidate;
+  if (!candObj || !candObj.candidate) return;
+  if (candObj.fromRole === getDeviceRole()) return;
+  const candKey = candObj.id || JSON.stringify(candObj.candidate);
+  if (addedCandidateIds.has(candKey)) return;
+  addedCandidateIds.add(candKey);
+
+  if (pc && pc.remoteDescription) {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candObj.candidate));
+    } catch {
+      // Sessiz geç
+    }
+  }
 }
 
 function beginCallConversationTimer(contentEl) {
@@ -209,15 +378,17 @@ function beginCallConversationTimer(contentEl) {
   stopConversationTimerOnly();
   callPhase = "connected";
   state.callSeconds = 0;
+
   if (contentEl && state.activeTab === "sohbet") {
     renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
   }
+  renderFullScreenCallOverlay(contentEl);
 
   state.callTimer = setInterval(() => {
     state.callSeconds += 1;
-    const durEl = document.getElementById("call-duration");
-    if (durEl) {
-      durEl.textContent = `Süre: ${formatCallTime(state.callSeconds)}${
+    const durEl = document.getElementById("wa-call-status-text");
+    if (durEl && callPhase === "connected") {
+      durEl.textContent = `Bağlandı · ${formatCallTime(state.callSeconds)}${
         micMuted ? " · Mikrofon kapalı" : ""
       }`;
     }
@@ -230,25 +401,20 @@ function startRingingCountdown(contentEl, mode, callId) {
 
   ringTimer = setInterval(() => {
     ringSecondsLeft -= 1;
-    const durEl = document.getElementById("call-duration");
-    if (durEl && callPhase === "ringing") {
-      durEl.textContent = `${state.partnerName || "Emine"} aranıyor... (${formatCallTime(
-        ringSecondsLeft
-      )})`;
-    }
-
-    const incSub = document.getElementById("incoming-call-sub");
-    if (incSub && callPhase === "ringing") {
-      incSub.textContent = `Seni ${mode === "video" ? "görüntülü" : "sesli"} arıyor... (${formatCallTime(
-        ringSecondsLeft
-      )})`;
+    const statusEl = document.getElementById("wa-call-status-text");
+    if (statusEl && callPhase === "ringing") {
+      statusEl.textContent =
+        callDirection === "outgoing"
+          ? `${state.partnerName || "Emine"} aranıyor... (${formatCallTime(ringSecondsLeft)})`
+          : `Seni ${mode === "video" ? "görüntülü" : "sesli"} arıyor... (${formatCallTime(
+              ringSecondsLeft
+            )})`;
     }
 
     if (ringSecondsLeft <= 0) {
       const myRole = getDeviceRole() || "userA";
       const partnerRole = getPartnerRole(myRole);
       stopCallMediaAndTimers();
-      state.callMode = null;
       writeCallSignal({
         callId,
         callerRole: callDirection === "outgoing" ? myRole : partnerRole,
@@ -267,19 +433,187 @@ function startRingingCountdown(contentEl, mode, callId) {
   }, 1000);
 }
 
-export function handleIncomingCallSignal(signal, contentEl) {
+function renderFullScreenCallOverlay(contentEl) {
+  document.getElementById("wa-call-screen-overlay")?.remove();
+  if (!activeCallMode || !callPhase) return;
+
+  const myRole = getDeviceRole() || "userA";
+  const partnerRole = getPartnerRole(myRole);
+  const partnerLabel = state.partnerName || "Emine";
+  const isIncomingRinging = callPhase === "ringing" && callDirection === "incoming";
+  const isConnected = callPhase === "connected";
+  const isVideo = activeCallMode === "video";
+  const avatarInitial = (partnerLabel || "E").trim()[0]?.toUpperCase() || "E";
+
+  const statusLabel = isConnected
+    ? `Bağlandı · ${formatCallTime(state.callSeconds)}${micMuted ? " · Mikrofon kapalı" : ""}`
+    : isIncomingRinging
+    ? `Seni ${isVideo ? "görüntülü" : "sesli"} arıyor... (${formatCallTime(ringSecondsLeft)})`
+    : `${partnerLabel} aranıyor... (${formatCallTime(ringSecondsLeft)})`;
+
+  const overlay = document.createElement("div");
+  overlay.id = "wa-call-screen-overlay";
+  overlay.className = "wa-call-screen";
+  overlay.innerHTML = `
+    <div class="wa-call-top">
+      <span class="wa-call-badge">${isVideo ? "GÖRÜNTÜLÜ ARAMA" : "SESLİ ARAMA"}</span>
+      <div class="wa-call-peer-name">${partnerLabel}</div>
+      <div class="wa-call-status-text" id="wa-call-status-text">${statusLabel}</div>
+    </div>
+
+    <div class="wa-call-stage">
+      <audio id="wa-remote-audio" autoplay playsinline></audio>
+      ${
+        isVideo && isConnected
+          ? `
+            <video id="wa-remote-video" class="wa-remote-video" autoplay playsinline></video>
+            <div class="wa-local-pip">
+              <video id="wa-local-video" autoplay playsinline muted></video>
+            </div>
+          `
+          : `
+            <div class="wa-call-avatar-ring">
+              ${
+                state.partnerAvatar
+                  ? `<img src="${state.partnerAvatar}" alt="${partnerLabel}" />`
+                  : avatarInitial
+              }
+            </div>
+          `
+      }
+    </div>
+
+    <div class="wa-call-controls">
+      ${
+        isIncomingRinging
+          ? `
+            <button type="button" class="wa-round-btn accept" id="wa-fs-accept-btn" title="Katıl">✓</button>
+            <button type="button" class="wa-round-btn hangup" id="wa-fs-reject-btn" title="Reddet">✕</button>
+          `
+          : `
+            <button
+              type="button"
+              class="wa-round-btn ${micMuted ? "muted-on" : "neutral"}"
+              id="wa-fs-mic-btn"
+              title="Mikrofon"
+            >${micMuted ? "🔇" : "🎤"}</button>
+
+            ${
+              isVideo
+                ? `
+                  <button
+                    type="button"
+                    class="wa-round-btn ${camOff ? "muted-on" : "neutral"}"
+                    id="wa-fs-cam-btn"
+                    title="Kamera"
+                  >${camOff ? "📷✕" : "📷"}</button>
+                `
+                : ""
+            }
+
+            <button type="button" class="wa-round-btn hangup" id="wa-fs-end-btn" title="Kapat">📞</button>
+          `
+      }
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  attachMediaToCallScreen();
+
+  document.getElementById("wa-fs-accept-btn")?.addEventListener("click", async () => {
+    const mode = activeCallMode || "voice";
+    const mediaRes = await requestMediaPermissionSafe(mode);
+    if (mediaRes.ok && mediaRes.stream) {
+      callStream = mediaRes.stream;
+    }
+    const activeId = currentCallId || `${Date.now()}`;
+    await ensurePeerConnection(activeId, myRole, partnerRole, mode);
+    await writeCallSignal({
+      callId: activeId,
+      callerRole: partnerRole,
+      calleeRole: myRole,
+      mode,
+      status: "accepted",
+      updatedAt: Date.now()
+    });
+    beginCallConversationTimer(contentEl);
+  });
+
+  document.getElementById("wa-fs-reject-btn")?.addEventListener("click", async () => {
+    const mode = activeCallMode || "voice";
+    const activeId = currentCallId || `${Date.now()}`;
+    stopCallMediaAndTimers();
+    await writeCallSignal({
+      callId: activeId,
+      callerRole: partnerRole,
+      calleeRole: myRole,
+      mode,
+      status: "rejected",
+      updatedAt: Date.now()
+    });
+    if (contentEl && state.activeTab === "sohbet") {
+      renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
+    }
+  });
+
+  document.getElementById("wa-fs-end-btn")?.addEventListener("click", async () => {
+    const mode = activeCallMode || "voice";
+    const wasConnected = callPhase === "connected";
+    const elapsed = state.callSeconds;
+    const activeId = currentCallId || `${Date.now()}`;
+    const cRole = callDirection === "outgoing" ? myRole : partnerRole;
+    const eRole = callDirection === "outgoing" ? partnerRole : myRole;
+
+    stopCallMediaAndTimers();
+    await writeCallSignal({
+      callId: activeId,
+      callerRole: cRole,
+      calleeRole: eRole,
+      mode,
+      status: "ended",
+      updatedAt: Date.now()
+    });
+
+    if (callDirection === "outgoing") {
+      appendCallLogMessage(mode, wasConnected ? elapsed : 0, wasConnected ? "ended" : "missed");
+    }
+    if (contentEl && state.activeTab === "sohbet") {
+      renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
+    }
+  });
+
+  document.getElementById("wa-fs-mic-btn")?.addEventListener("click", () => {
+    micMuted = !micMuted;
+    callStream?.getAudioTracks().forEach((t) => {
+      t.enabled = !micMuted;
+    });
+    renderFullScreenCallOverlay(contentEl);
+  });
+
+  document.getElementById("wa-fs-cam-btn")?.addEventListener("click", () => {
+    camOff = !camOff;
+    callStream?.getVideoTracks().forEach((t) => {
+      t.enabled = !camOff;
+    });
+    renderFullScreenCallOverlay(contentEl);
+  });
+}
+
+export async function handleIncomingCallSignal(signal, contentEl) {
   const myRole = getDeviceRole();
   if (!myRole || !signal || typeof signal !== "object") return;
 
   const { callId, callerRole, calleeRole, mode, status, updatedAt } = signal;
   if (!callId || !mode || !status) return;
 
-  const sigKey = `${callId}:${status}:${updatedAt || 0}`;
-  if (handledSignalKey === sigKey) return;
+  const partnerRole = getPartnerRole(myRole);
 
   if (status === "ringing") {
-    if (calleeRole === myRole && !state.callMode) {
+    const sigKey = `${callId}:ringing:${updatedAt || 0}`;
+    if (handledSignalKey === sigKey) return;
+    if (calleeRole === myRole && !activeCallMode) {
       handledSignalKey = sigKey;
+      activeCallMode = mode;
       state.callMode = mode;
       callPhase = "ringing";
       callDirection = "incoming";
@@ -287,28 +621,41 @@ export function handleIncomingCallSignal(signal, contentEl) {
       state.activeTab = "sohbet";
       if (contentEl) {
         renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
-        startRingingCountdown(contentEl, mode, callId);
       }
+      renderFullScreenCallOverlay(contentEl);
+      startRingingCountdown(contentEl, mode, callId);
     }
     return;
   }
 
-  if (status === "accepted") {
-    if ((callerRole === myRole || calleeRole === myRole) && currentCallId === callId) {
-      handledSignalKey = sigKey;
+  if (status === "accepted" && currentCallId === callId && (callerRole === myRole || calleeRole === myRole)) {
+    if (callPhase !== "connected") {
       beginCallConversationTimer(contentEl);
+    }
+    if (callDirection === "outgoing" && callerRole === myRole && signal.sdpOffer) {
+      await handleRemoteSdpOffer(signal, myRole, partnerRole, mode);
+    }
+    if (callDirection === "outgoing" && callerRole === myRole && !signal.sdpOffer && !signal.sdpAnswer) {
+      await createAndSendOffer(callId, myRole, partnerRole, mode);
+    }
+    if (signal.sdpAnswer) {
+      await handleRemoteSdpAnswer(signal);
+    }
+    if (signal.iceCandidate) {
+      await handleRemoteIceCandidate(signal);
     }
     return;
   }
 
   if (status === "ended" || status === "rejected" || status === "missed") {
-    if ((callerRole === myRole || calleeRole === myRole) && (currentCallId === callId || state.callMode)) {
+    const sigKey = `${callId}:${status}:${updatedAt || 0}`;
+    if (handledSignalKey === sigKey) return;
+    if ((callerRole === myRole || calleeRole === myRole) && (currentCallId === callId || activeCallMode)) {
       handledSignalKey = sigKey;
-      const finishedMode = state.callMode || mode;
+      const finishedMode = activeCallMode || mode;
       const wasConnected = callPhase === "connected";
       const elapsed = state.callSeconds;
       stopCallMediaAndTimers();
-      state.callMode = null;
       if (callerRole === myRole) {
         appendCallLogMessage(
           finishedMode,
@@ -321,12 +668,6 @@ export function handleIncomingCallSignal(signal, contentEl) {
       }
     }
   }
-}
-
-function attachStreamToVideoEl() {
-  const videoEl = document.getElementById("call-local-video");
-  if (!videoEl) return;
-  videoEl.srcObject = callStream && !camOff && state.callMode === "video" ? callStream : null;
 }
 
 function blobToDataUrl(blob) {
@@ -713,6 +1054,7 @@ export function renderSohbet(
   const presence = getPresenceMeta();
   const todayKey = getLocalDayKey();
 
+  let lastRenderedDateKey = "";
   const messagesHtml =
     state.messages.length > 0
       ? state.messages
@@ -720,8 +1062,15 @@ export function renderSohbet(
             const msgDateKey = msg.dateKey || getLocalDayKey(new Date(msg.createdAt || msg.id || Date.now()));
             const dateAttr = `data-msg-date="${msgDateKey}"`;
 
+            let dayDividerHtml = "";
+            if (msgDateKey !== lastRenderedDateKey) {
+              lastRenderedDateKey = msgDateKey;
+              dayDividerHtml = `<div class="inline-date-divider">${formatWhatsAppDateLabel(msgDateKey)}</div>`;
+            }
+
             if (msg.type === "call") {
               return `
+                ${dayDividerHtml}
                 <div class="call-log-item" ${dateAttr}>
                   <strong>${msg.text}</strong>
                   <span class="call-log-time">${msg.time}</span>
@@ -765,6 +1114,7 @@ export function renderSohbet(
               : "";
 
             return `
+              ${dayDividerHtml}
               <div class="msg-wrap ${msg.sender}" data-msg-wrap="${msg.id}" ${dateAttr}>
                 <div class="msg ${msg.sender}" data-msg-bubble="${msg.id}">
                   ${replyQuoteHtml}
@@ -804,91 +1154,19 @@ export function renderSohbet(
     `
     : "";
 
-  const isCallBusy = Boolean(state.callMode) || isStartingCall;
-  const isRinging = state.callMode && callPhase === "ringing";
-  const isConnected = state.callMode && callPhase === "connected";
-  const isIncomingCall = isRinging && callDirection === "incoming";
-  const callKindText = state.callMode === "video" ? "görüntülü" : "sesli";
-
-  const incomingCardHtml = isIncomingCall
+  const audioDraftHtml = pendingAudioDraft
     ? `
-      <div class="incoming-call-card">
-        <div class="incoming-caller-meta">
-          <span class="incoming-caller-name">${partnerLabel}</span>
-          <span class="peer-sub" id="incoming-call-sub">Seni ${callKindText} arıyor... (${formatCallTime(
-            ringSecondsLeft
-          )})</span>
-        </div>
-        <div class="call-actions">
-          <button type="button" class="call-btn accept" id="accept-call-btn">Katıl</button>
-          <button type="button" class="call-btn danger" id="reject-call-btn">Reddet</button>
+      <div class="audio-draft-bar" id="audio-draft-bar">
+        ${renderCustomAudioBubble(pendingAudioDraft.dataUrl, "draft_audio")}
+        <div class="audio-draft-actions">
+          <button type="button" class="tool-btn" id="cancel-audio-draft-btn">Kaydı İptal Et</button>
+          <button type="button" class="send-btn" id="send-audio-draft-btn">Gönder</button>
         </div>
       </div>
     `
     : "";
 
-  const videoSectionHtml =
-    isConnected && state.callMode === "video"
-      ? `
-        <div class="call-video-box">
-          ${
-            camOff
-              ? `<div class="call-video-off">Kamera kapalı</div>`
-              : `<video id="call-local-video" class="call-video-el" autoplay playsinline muted></video>`
-          }
-        </div>
-      `
-      : "";
-
-  const callBannerHtml = state.callMode
-    ? `
-      <div class="active-call-card">
-        <div class="call-header-row">
-          <div>
-            <strong>${
-              state.callMode === "video" ? "Görüntülü Arama" : "Sesli Arama"
-            } · ${partnerLabel}</strong>
-            <div class="peer-sub" id="call-duration">
-              ${
-                isRinging
-                  ? `${partnerLabel} aranıyor... (${formatCallTime(ringSecondsLeft)})`
-                  : `Süre: ${formatCallTime(state.callSeconds)}${micMuted ? " · Mikrofon kapalı" : ""}`
-              }
-            </div>
-          </div>
-          <button type="button" class="call-btn danger" id="end-call-btn">Aramayı Kapat</button>
-        </div>
-
-        ${videoSectionHtml}
-
-        ${
-          isConnected
-            ? `
-              <div class="call-controls-row">
-                <button
-                  type="button"
-                  class="call-btn ${micMuted ? "active-toggle" : ""}"
-                  id="toggle-mic-btn"
-                >${micMuted ? "Mikrofonu Aç" : "Mikrofonu Kapat"}</button>
-
-                ${
-                  state.callMode === "video"
-                    ? `<button
-                        type="button"
-                        class="call-btn ${camOff ? "active-toggle" : ""}"
-                        id="toggle-cam-btn"
-                      >${camOff ? "Kamerayı Aç" : "Kamerayı Kapat"}</button>`
-                    : ""
-                }
-              </div>
-            `
-            : ""
-        }
-      </div>
-    `
-    : callErrorMsg
-    ? `<div class="toast">${callErrorMsg}</div>`
-    : "";
+  const isCallBusy = Boolean(activeCallMode) || isStartingCall;
 
   const photoPreviewHtml = state.pendingPhoto
     ? `
@@ -924,14 +1202,11 @@ export function renderSohbet(
     : `<div class="avatar-circle">${avatarInitial}</div>`;
 
   const lastMsg = state.messages[state.messages.length - 1];
-  const initialDateLabel = formatWhatsAppDateLabel(
-    lastMsg?.dateKey || todayKey
-  );
+  const initialDateLabel = formatWhatsAppDateLabel(lastMsg?.dateKey || todayKey);
+  const isRecordingNow = Boolean(state.mediaRecorder && state.mediaRecorder.state === "recording");
 
   contentEl.innerHTML = `
     <div class="chat-layout">
-      ${incomingCardHtml}
-
       <div class="chat-top-card">
         <div class="chat-peer">
           ${avatarHtml}
@@ -946,7 +1221,7 @@ export function renderSohbet(
         </div>
       </div>
 
-      ${callBannerHtml}
+      ${callErrorMsg ? `<div class="toast">${callErrorMsg}</div>` : ""}
 
       <div class="messages-wrapper">
         <div class="sticky-date-header" id="sticky-date-header">${initialDateLabel}</div>
@@ -958,6 +1233,7 @@ export function renderSohbet(
       <div class="composer-card">
         ${emojiDrawerHtml}
         ${photoPreviewHtml}
+        ${audioDraftHtml}
         ${replyPreviewHtml}
 
         <div class="composer-main">
@@ -978,15 +1254,17 @@ export function renderSohbet(
             Fotoğraf
             <input type="file" id="photo-input" accept="image/*" hidden />
           </label>
-          <button type="button" class="tool-btn" id="record-btn">Ses Kaydet</button>
+          <button type="button" class="tool-btn ${isRecordingNow ? "recording" : ""}" id="record-btn">
+            ${isRecordingNow ? "Kaydı Durdur" : "Ses Kaydet"}
+          </button>
           <span id="record-status" class="muted-note"></span>
         </div>
       </div>
     </div>
   `;
 
-  if (isConnected && state.callMode === "video" && !camOff) {
-    attachStreamToVideoEl();
+  if (activeCallMode && callPhase) {
+    renderFullScreenCallOverlay(contentEl);
   }
 
   if (peerModalOpen) {
@@ -1054,6 +1332,46 @@ export function renderSohbet(
   syncStickyDateOnScroll();
 
   bindCustomAudioPlayers(panel);
+
+  const draftBar = document.getElementById("audio-draft-bar");
+  if (draftBar) {
+    bindCustomAudioPlayers(draftBar);
+  }
+
+  document.getElementById("cancel-audio-draft-btn")?.addEventListener("click", () => {
+    pendingAudioDraft = null;
+    renderSohbet(contentEl, true, { scrollToBottom: false, preserveScroll: true });
+  });
+
+  document.getElementById("send-audio-draft-btn")?.addEventListener("click", async () => {
+    if (!pendingAudioDraft?.dataUrl) return;
+    const senderName = state.myName || "Samet";
+    const now = Date.now();
+    state.messages.push({
+      id: now + Math.floor(Math.random() * 100),
+      sender: "me",
+      authorRole: getDeviceRole() || "userA",
+      type: "audio",
+      src: pendingAudioDraft.dataUrl,
+      time: nowTime(),
+      createdAt: now,
+      dateKey: getLocalDayKey(new Date(now)),
+      status: "sent",
+      reaction: null,
+      replyTo: buildReplyPayload(activeReplyMsg)
+    });
+    pendingAudioDraft = null;
+    replyingToMsgId = null;
+    clearTimeout(typingStopTimeout);
+    setMyTypingStatus(false);
+    await saveState({ pushCloud: true });
+    dispatchNotificationEvent({
+      kind: "message",
+      title: `${senderName} ses kaydı gönderdi`,
+      body: "🎤 Yeni sesli mesaj"
+    });
+    renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
+  });
 
   document.getElementById("chat-preview-thumb")?.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1213,7 +1531,7 @@ export function renderSohbet(
   });
 
   const startOutgoingCall = async (mode) => {
-    if (state.callMode || isStartingCall) return;
+    if (activeCallMode || isStartingCall) return;
     isStartingCall = true;
     callErrorMsg = "";
     stopCallMediaAndTimers();
@@ -1225,7 +1543,6 @@ export function renderSohbet(
     if (!mediaRes.ok || !mediaRes.stream) {
       isStartingCall = false;
       stopCallMediaAndTimers();
-      state.callMode = null;
       callErrorMsg =
         mediaRes.reason === "unsupported"
           ? "Bu cihazda ses/görüntü araması desteklenmiyor."
@@ -1242,6 +1559,7 @@ export function renderSohbet(
     const callId = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     callStream = mediaRes.stream;
+    activeCallMode = mode;
     state.callMode = mode;
     state.callSeconds = 0;
     callPhase = "ringing";
@@ -1252,6 +1570,8 @@ export function renderSohbet(
 
     const callLabel = mode === "video" ? "Görüntülü arama" : "Sesli arama";
     const senderName = state.myName || "Samet";
+
+    await ensurePeerConnection(callId, myRole, partnerRole, mode);
 
     await writeCallSignal({
       callId,
@@ -1272,98 +1592,12 @@ export function renderSohbet(
 
     isStartingCall = false;
     renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
+    renderFullScreenCallOverlay(contentEl);
     startRingingCountdown(contentEl, mode, callId);
   };
 
   document.getElementById("voice-call-btn")?.addEventListener("click", () => startOutgoingCall("voice"));
   document.getElementById("video-call-btn")?.addEventListener("click", () => startOutgoingCall("video"));
-
-  document.getElementById("accept-call-btn")?.addEventListener("click", async () => {
-    const mode = state.callMode || "voice";
-    const mediaRes = await requestMediaPermissionSafe(mode);
-    if (mediaRes.ok && mediaRes.stream) {
-      callStream = mediaRes.stream;
-    }
-    const myRole = getDeviceRole() || "userB";
-    const partnerRole = getPartnerRole(myRole);
-    const activeId = currentCallId || `${Date.now()}`;
-
-    await writeCallSignal({
-      callId: activeId,
-      callerRole: partnerRole,
-      calleeRole: myRole,
-      mode,
-      status: "accepted",
-      updatedAt: Date.now()
-    });
-
-    beginCallConversationTimer(contentEl);
-  });
-
-  document.getElementById("reject-call-btn")?.addEventListener("click", async () => {
-    const mode = state.callMode || "voice";
-    const myRole = getDeviceRole() || "userB";
-    const partnerRole = getPartnerRole(myRole);
-    const activeId = currentCallId || `${Date.now()}`;
-
-    stopCallMediaAndTimers();
-    state.callMode = null;
-
-    await writeCallSignal({
-      callId: activeId,
-      callerRole: partnerRole,
-      calleeRole: myRole,
-      mode,
-      status: "rejected",
-      updatedAt: Date.now()
-    });
-
-    renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
-  });
-
-  document.getElementById("end-call-btn")?.addEventListener("click", async () => {
-    const mode = state.callMode || "voice";
-    const wasConnected = callPhase === "connected";
-    const elapsed = state.callSeconds;
-    const myRole = getDeviceRole() || "userA";
-    const partnerRole = getPartnerRole(myRole);
-    const activeId = currentCallId || `${Date.now()}`;
-
-    stopCallMediaAndTimers();
-    state.callMode = null;
-
-    await writeCallSignal({
-      callId: activeId,
-      callerRole: callDirection === "outgoing" ? myRole : partnerRole,
-      calleeRole: callDirection === "outgoing" ? partnerRole : myRole,
-      mode,
-      status: "ended",
-      updatedAt: Date.now()
-    });
-
-    if (callDirection === "outgoing") {
-      appendCallLogMessage(mode, wasConnected ? elapsed : 0, wasConnected ? "ended" : "missed");
-    }
-    renderSohbet(contentEl, false, { scrollToBottom: true, preserveScroll: false });
-  });
-
-  const toggleCallTrack = (kind) => {
-    if (kind === "mic") {
-      micMuted = !micMuted;
-      callStream?.getAudioTracks().forEach((t) => {
-        t.enabled = !micMuted;
-      });
-    } else {
-      camOff = !camOff;
-      callStream?.getVideoTracks().forEach((t) => {
-        t.enabled = !camOff;
-      });
-    }
-    renderSohbet(contentEl, false, { scrollToBottom: false, preserveScroll: true });
-  };
-
-  document.getElementById("toggle-mic-btn")?.addEventListener("click", () => toggleCallTrack("mic"));
-  document.getElementById("toggle-cam-btn")?.addEventListener("click", () => toggleCallTrack("cam"));
 
   document.getElementById("photo-input")?.addEventListener("change", (e) => {
     const file = e.target.files?.[0];
@@ -1390,6 +1624,7 @@ export function renderSohbet(
       return;
     }
 
+    pendingAudioDraft = null;
     const mediaRes = await requestMediaPermissionSafe("voice");
     if (!mediaRes.ok || !mediaRes.stream) {
       if (recordStatus) {
@@ -1429,37 +1664,18 @@ export function renderSohbet(
 
       if (blob.size > 0) {
         const audioDataUrl = await blobToDataUrl(blob);
-        const senderName = state.myName || "Samet";
-        const now = Date.now();
-        state.messages.push({
-          id: now + Math.floor(Math.random() * 100),
-          sender: "me",
-          authorRole: getDeviceRole() || "userA",
-          type: "audio",
-          src: audioDataUrl,
-          time: nowTime(),
-          createdAt: now,
-          dateKey: getLocalDayKey(new Date(now)),
-          status: "sent",
-          reaction: null,
-          replyTo: buildReplyPayload(activeReplyMsg)
-        });
-        replyingToMsgId = null;
-        clearTimeout(typingStopTimeout);
-        setMyTypingStatus(false);
-        await saveState({ pushCloud: true });
-        dispatchNotificationEvent({
-          kind: "message",
-          title: `${senderName} ses kaydı gönderdi`,
-          body: "🎤 Yeni sesli mesaj"
-        });
-        renderSohbet(contentEl, true, { scrollToBottom: true, preserveScroll: false });
+        pendingAudioDraft = { dataUrl: audioDataUrl };
       }
+
+      clearTimeout(typingStopTimeout);
+      setMyTypingStatus(false);
+      renderSohbet(contentEl, true, { scrollToBottom: false, preserveScroll: true });
     };
 
     recorder.start();
-    if (recordStatus) recordStatus.textContent = "Kaydediliyor...";
+    recordBtn.classList.add("recording");
     recordBtn.textContent = "Kaydı Durdur";
+    if (recordStatus) recordStatus.textContent = "Kaydediliyor...";
   });
 
   const sendCurrentMessage = async () => {
@@ -1513,3 +1729,8 @@ export function renderSohbet(
     }
   });
 }
+
+initCallSignalListener((signal) => {
+  const contentEl = document.getElementById("app-content") || document.getElementById("content");
+  handleIncomingCallSignal(signal, contentEl);
+});
