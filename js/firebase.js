@@ -3,7 +3,8 @@ import {
   getDatabase,
   ref,
   set,
-  onValue
+  onValue,
+  off
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 
 const firebaseConfig = {
@@ -18,4 +19,4 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app);
-export { ref, set, onValue };
+export { ref, set, onValue, off };
