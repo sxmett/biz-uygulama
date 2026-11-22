@@ -93,82 +93,158 @@
   border-color: var(--accent);
 }
 
-.active-call-card {
-  background: var(--surface);
-  border: 1px solid var(--accent-soft);
-  border-radius: var(--radius);
-  padding: 16px 18px;
+/* WhatsApp benzeri tam ekran arama arayüzü */
+.wa-call-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9800;
+  background: linear-gradient(165deg, #1a0c14 0%, #2c1020 48%, #12090e 100%);
+  color: #ffffff;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.incoming-call-card {
-  background: linear-gradient(135deg, #ffffff 0%, #fff1f4 100%);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  box-shadow: 0 10px 24px rgba(225, 29, 72, 0.08);
+  padding: 28px 22px 34px;
 }
 
-.incoming-caller-meta {
+.wa-call-top {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-}
-
-.incoming-caller-name {
-  font-size: 0.98rem;
-  font-weight: 800;
-  color: var(--text);
-}
-
-.call-header-row {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.call-controls-row {
-  display: flex;
-  align-items: center;
+  text-align: center;
   gap: 8px;
-  flex-wrap: wrap;
+  z-index: 3;
 }
 
-.call-video-box {
+.wa-call-badge {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffe4ec;
+}
+
+.wa-call-peer-name {
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.wa-call-status-text {
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.82);
+  font-variant-numeric: tabular-nums;
+}
+
+.wa-call-stage {
   position: relative;
+  flex: 1;
   width: 100%;
-  max-height: 280px;
-  border-radius: 16px;
+  max-width: 680px;
+  margin: 18px auto;
+  border-radius: 24px;
   overflow: hidden;
-  background: #111318;
-  border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.call-video-el {
+.wa-call-avatar-ring {
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff4d7d, #e11d48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.4rem;
+  font-weight: 800;
+  color: #ffffff;
+  overflow: hidden;
+  box-shadow: 0 0 0 12px rgba(255, 77, 125, 0.18);
+}
+
+.wa-call-avatar-ring img {
   width: 100%;
-  max-height: 280px;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wa-remote-video {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.wa-local-pip {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 112px;
+  aspect-ratio: 3 / 4;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  background: #111318;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+.wa-local-pip video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   transform: scaleX(-1);
 }
 
-.call-video-off {
-  padding: 36px 16px;
-  color: #e5e7eb;
-  font-size: 0.9rem;
-  font-weight: 600;
+.wa-call-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  z-index: 3;
+}
+
+.wa-round-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  font-size: 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.14s ease, opacity 0.14s ease;
+}
+
+.wa-round-btn:active {
+  transform: scale(0.93);
+}
+
+.wa-round-btn.neutral {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.wa-round-btn.muted-on {
+  background: #ffffff;
+  color: #18181b;
+}
+
+.wa-round-btn.accept {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.wa-round-btn.hangup {
+  background: #e11d48;
+  color: #ffffff;
 }
 
 .messages-wrapper {
@@ -182,10 +258,10 @@
   top: 8px;
   align-self: center;
   z-index: 6;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.96);
   color: var(--muted);
   border: 1px solid var(--border);
-  box-shadow: 0 4px 12px rgba(24, 16, 24, 0.07);
+  box-shadow: 0 4px 12px rgba(24, 16, 24, 0.08);
   padding: 4px 12px;
   border-radius: 999px;
   font-size: 0.74rem;
@@ -209,6 +285,19 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Sohbet içi gün/tarih ayırıcı rozeti */
+.inline-date-divider {
+  align-self: center;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin: 4px 0;
 }
 
 .call-log-item {
@@ -294,7 +383,6 @@
   border-bottom-left-radius: 4px;
 }
 
-/* WhatsApp benzeri sade ses balonu */
 .wa-audio-player {
   display: flex;
   align-items: center;
@@ -380,6 +468,24 @@
   font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
   opacity: 0.9;
+}
+
+.audio-draft-bar {
+  background: var(--surface-soft);
+  border: 1px solid var(--accent-soft);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.audio-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .msg-reply-quote {
