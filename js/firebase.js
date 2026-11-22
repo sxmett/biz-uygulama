@@ -3,6 +3,7 @@ import {
   getDatabase,
   ref,
   set,
+  push,
   onValue,
   off
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
@@ -12,6 +13,11 @@ import {
   signOut,
   onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {
+  getMessaging,
+  getToken,
+  onMessage
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDzW2RmlLRRCcqouzGSO22leYv59kZjNjc",
@@ -30,9 +36,13 @@ export const auth = getAuth(app);
 export {
   ref,
   set,
+  push,
   onValue,
   off,
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  getMessaging,
+  getToken,
+  onMessage
 };
