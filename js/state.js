@@ -23,6 +23,8 @@ function createEmptyUserProfile(role) {
     online: false,
     lastSeen: "Henüz görülmedi",
     lastSeenAt: 0,
+    batteryLevel: null,
+    batteryCharging: null,
     location: {
       lat: null,
       lng: null,
@@ -40,8 +42,9 @@ export const defaultState = {
   activeTab: "biz",
   startDate: "2025-12-12T00:00:00",
   specialEvent: {
-    title: "Yıldönümü",
-    date: "2026-12-12T00:00:00"
+    title: "Özel Gün",
+    date: "",
+    isSet: false
   },
   userProfiles: {
     userA: createEmptyUserProfile("userA"),
@@ -55,6 +58,10 @@ export const defaultState = {
   partnerMood: "Uyuyor",
   partnerOnline: false,
   partnerLastSeen: "Henüz görülmedi",
+  partnerBatteryLevel: null,
+  partnerBatteryCharging: null,
+  myBatteryLevel: null,
+  myBatteryCharging: null,
   partnerNote: "",
   myNote: "",
   moods: ["Uyuyor", "Seni özledi", "Derste / Çalışıyor", "Yolda"],
@@ -170,11 +177,23 @@ function ensureProfilesExist(source) {
     userA: {
       ...baseA,
       ...rawA,
+      batteryLevel:
+        typeof rawA.batteryLevel === "number" && Number.isFinite(rawA.batteryLevel)
+          ? rawA.batteryLevel
+          : null,
+      batteryCharging:
+        typeof rawA.batteryCharging === "boolean" ? rawA.batteryCharging : null,
       location: normalizeLocationObj(rawA.location)
     },
     userB: {
       ...baseB,
       ...rawB,
+      batteryLevel:
+        typeof rawB.batteryLevel === "number" && Number.isFinite(rawB.batteryLevel)
+          ? rawB.batteryLevel
+          : null,
+      batteryCharging:
+        typeof rawB.batteryCharging === "boolean" ? rawB.batteryCharging : null,
       location: normalizeLocationObj(rawB.location)
     }
   };
@@ -199,6 +218,10 @@ export function syncRoleViewFields() {
   state.partnerMood = partner.mood || "Uyuyor";
   state.partnerOnline = Boolean(partner.online);
   state.partnerLastSeen = partner.lastSeen || "Henüz görülmedi";
+  state.myBatteryLevel = me.batteryLevel ?? null;
+  state.myBatteryCharging = me.batteryCharging ?? null;
+  state.partnerBatteryLevel = partner.batteryLevel ?? null;
+  state.partnerBatteryCharging = partner.batteryCharging ?? null;
   state.myLocation = normalizeLocationObj(me.location);
   state.partnerLocation = normalizeLocationObj(partner.location);
   state.myMissCount = Number(me.missCount) || 0;
@@ -263,6 +286,33 @@ export function writePartnerProfileChanges(patch = {}) {
   syncRoleViewFields();
 }
 
+export async function syncDeviceBatteryLevel({ pushCloud = false } = {}) {
+  if (!getDeviceRole()) return null;
+  if (typeof navigator === "undefined" || typeof navigator.getBattery !== "function") {
+    return null;
+  }
+  try {
+    const battery = await navigator.getBattery();
+    const levelPct = Math.max(0, Math.min(100, Math.round((battery.level || 0) * 100)));
+    const charging = Boolean(battery.charging);
+    const changed =
+      state.myBatteryLevel !== levelPct || state.myBatteryCharging !== charging;
+
+    if (changed) {
+      writeMyProfileChanges({
+        batteryLevel: levelPct,
+        batteryCharging: charging
+      });
+      if (pushCloud) {
+        saveState({ pushCloud: true });
+      }
+    }
+    return { levelPct, charging, changed };
+  } catch {
+    return null;
+  }
+}
+
 export function applyRoleNamesToState() {
   syncRoleViewFields();
 }
@@ -281,7 +331,8 @@ export function setDeviceRole(role) {
     lastSeenAt: Date.now()
   });
   state.messages = normalizeMessagesForRole(state.messages);
-  saveState({ pushCloud: true });
+  saveState({ pushCloud: true, immediate: true });
+  syncDeviceBatteryLevel({ pushCloud: true });
   return safeRole;
 }
 
@@ -300,7 +351,7 @@ export function clearDeviceRole() {
       lastSeen: `Bugün ${nowTime()}`,
       lastSeenAt: Date.now()
     });
-    saveState({ pushCloud: true });
+    saveState({ pushCloud: true, immediate: true });
   }
   try {
     localStorage.removeItem(DEVICE_ROLE_KEY);
@@ -367,13 +418,17 @@ function applySharedSnapshot(dataSource) {
 
   state.specialEvent = {
     title:
-      typeof dataSource.specialEvent?.title === "string" && dataSource.specialEvent.title.trim()
+      typeof dataSource.specialEvent?.title === "string"
         ? dataSource.specialEvent.title
-        : state.specialEvent?.title || defaultState.specialEvent.title,
+        : state.specialEvent?.title || "",
     date:
-      typeof dataSource.specialEvent?.date === "string" && dataSource.specialEvent.date.trim()
+      typeof dataSource.specialEvent?.date === "string"
         ? dataSource.specialEvent.date
-        : state.specialEvent?.date || defaultState.specialEvent.date
+        : state.specialEvent?.date || "",
+    isSet:
+      typeof dataSource.specialEvent?.isSet === "boolean"
+        ? dataSource.specialEvent.isSet
+        : Boolean(dataSource.specialEvent?.date)
   };
 
   const mergedProfiles = ensureProfilesExist(dataSource);
@@ -389,6 +444,10 @@ function applySharedSnapshot(dataSource) {
       state.userProfiles[myRole].lastSeen || mergedProfiles[myRole].lastSeen;
     mergedProfiles[myRole].lastSeenAt =
       state.userProfiles[myRole].lastSeenAt || mergedProfiles[myRole].lastSeenAt;
+    if (typeof state.userProfiles[myRole].batteryLevel === "number") {
+      mergedProfiles[myRole].batteryLevel = state.userProfiles[myRole].batteryLevel;
+      mergedProfiles[myRole].batteryCharging = state.userProfiles[myRole].batteryCharging;
+    }
   }
 
   state.userProfiles = mergedProfiles;
@@ -447,6 +506,7 @@ syncRoleViewFields();
 let suppressNextCloudPush = false;
 let cloudListenerStarted = false;
 let callSignalListenerStarted = false;
+let saveDebounceTimer = null;
 
 export function syncDailyMissReset() {
   const currentKey = getLocalDayKey();
@@ -490,18 +550,44 @@ export function buildPersistPayload() {
   };
 }
 
-export function saveState(options = { pushCloud: true }) {
+function flushSaveNow(shouldPushCloud) {
   try {
     syncRoleViewFields();
     const payload = buildPersistPayload();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    if (options.pushCloud !== false && !suppressNextCloudPush) {
+    const serialized = JSON.stringify(payload);
+    try {
+      localStorage.setItem(STORAGE_KEY, serialized);
+    } catch {
+      // Kota dolarsa ana iş parçacığını bloklama
+    }
+    if (shouldPushCloud && !suppressNextCloudPush) {
       return set(ref(db, SHARED_ROOM_PATH), payload).catch(() => {});
     }
     return Promise.resolve();
   } catch {
     return Promise.resolve();
   }
+}
+
+export function saveState(options = { pushCloud: true, immediate: false }) {
+  const shouldPush = options.pushCloud !== false;
+  if (options.immediate) {
+    if (saveDebounceTimer) {
+      clearTimeout(saveDebounceTimer);
+      saveDebounceTimer = null;
+    }
+    return flushSaveNow(shouldPush);
+  }
+
+  if (saveDebounceTimer) {
+    clearTimeout(saveDebounceTimer);
+  }
+  return new Promise((resolve) => {
+    saveDebounceTimer = setTimeout(() => {
+      saveDebounceTimer = null;
+      flushSaveNow(shouldPush).then(resolve).catch(resolve);
+    }, 180);
+  });
 }
 
 export async function writeCallSignal(signalData) {
@@ -545,6 +631,7 @@ export function setMyPresence(isOnline) {
   if (wasOnline !== active || active) {
     saveState({ pushCloud: true });
   }
+  syncDeviceBatteryLevel({ pushCloud: true });
 }
 
 export function setMyTypingStatus(isTyping) {
@@ -617,7 +704,7 @@ export function applyImportedBackup(rawData) {
   state.confirmDeleteId = null;
   state.activeReactionMsgId = null;
 
-  return saveState({ pushCloud: true });
+  return saveState({ pushCloud: true, immediate: true });
 }
 
 export function resetAllPersistedData() {
