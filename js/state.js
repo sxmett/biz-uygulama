@@ -1,4 +1,13 @@
-import { db, ref, set, onValue, off } from "./firebase.js";
+import {
+  db,
+  ref,
+  set,
+  onValue,
+  off,
+  auth,
+  signInWithEmailAndPassword,
+  signOut
+} from "./firebase.js";
 
 const STORAGE_KEY = "biz_app_state_v3";
 const LEGACY_KEYS = ["biz_app_state_v1", "biz_app_state_v2"];
@@ -6,6 +15,18 @@ const ADMIN_OWNER_KEY = "biz_admin_owner_v1";
 const DEVICE_ROLE_KEY = "biz_device_role_v1";
 const SHARED_ROOM_PATH = "biz_room/shared_state";
 const CALL_SIGNAL_PATH = "biz_room/call_signal";
+
+// Firebase Authentication'da oluşturacağın iki hesabın e-posta ve şifreleri
+const ROLE_AUTH_CREDENTIALS = {
+  userA: {
+    email: "samet@bizapp.local",
+    password: "smt-1506"
+  },
+  userB: {
+    email: "emine@bizapp.local",
+    password: "emos-1506"
+  }
+};
 
 export function getLocalDayKey(dateObj = new Date()) {
   const y = dateObj.getFullYear();
@@ -132,6 +153,20 @@ export function isUserLoggedIn() {
 
 export function getPartnerRole(role = getDeviceRole()) {
   return role === "userB" ? "userA" : "userB";
+}
+
+export async function ensureRoleFirebaseAuth(role = getDeviceRole()) {
+  if (!role || !ROLE_AUTH_CREDENTIALS[role]) return false;
+  const cred = ROLE_AUTH_CREDENTIALS[role];
+  if (auth.currentUser && auth.currentUser.email === cred.email) {
+    return true;
+  }
+  try {
+    await signInWithEmailAndPassword(auth, cred.email, cred.password);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeLocationObj(loc) {
@@ -317,13 +352,14 @@ export function applyRoleNamesToState() {
   syncRoleViewFields();
 }
 
-export function setDeviceRole(role) {
+export async function setDeviceRole(role) {
   const safeRole = role === "userB" ? "userB" : "userA";
   try {
     localStorage.setItem(DEVICE_ROLE_KEY, safeRole);
   } catch {
     // Sessiz geç
   }
+  await ensureRoleFirebaseAuth(safeRole);
   syncRoleViewFields();
   writeMyProfileChanges({
     online: true,
@@ -331,7 +367,7 @@ export function setDeviceRole(role) {
     lastSeenAt: Date.now()
   });
   state.messages = normalizeMessagesForRole(state.messages);
-  saveState({ pushCloud: true, immediate: true });
+  await saveState({ pushCloud: true, immediate: true });
   syncDeviceBatteryLevel({ pushCloud: true });
   return safeRole;
 }
@@ -358,6 +394,7 @@ export function clearDeviceRole() {
   } catch {
     // Sessiz geç
   }
+  signOut(auth).catch(() => {});
   state.callMode = null;
   if (state.callTimer) {
     clearInterval(state.callTimer);
@@ -411,25 +448,26 @@ function applySharedSnapshot(dataSource) {
   const todayKey = getLocalDayKey();
   const sameDay = dataSource.missDayKey === todayKey;
 
-  state.startDate =
-    typeof dataSource.startDate === "string" && dataSource.startDate.trim()
-      ? dataSource.startDate
-      : state.startDate || defaultState.startDate;
+  if (typeof dataSource.startDate === "string" && dataSource.startDate.trim()) {
+    state.startDate = dataSource.startDate;
+  }
 
-  state.specialEvent = {
-    title:
-      typeof dataSource.specialEvent?.title === "string"
-        ? dataSource.specialEvent.title
-        : state.specialEvent?.title || "",
-    date:
-      typeof dataSource.specialEvent?.date === "string"
-        ? dataSource.specialEvent.date
-        : state.specialEvent?.date || "",
-    isSet:
-      typeof dataSource.specialEvent?.isSet === "boolean"
-        ? dataSource.specialEvent.isSet
-        : Boolean(dataSource.specialEvent?.date)
-  };
+  if (dataSource.specialEvent && typeof dataSource.specialEvent === "object") {
+    state.specialEvent = {
+      title:
+        typeof dataSource.specialEvent.title === "string"
+          ? dataSource.specialEvent.title
+          : state.specialEvent?.title || "",
+      date:
+        typeof dataSource.specialEvent.date === "string"
+          ? dataSource.specialEvent.date
+          : state.specialEvent?.date || "",
+      isSet:
+        typeof dataSource.specialEvent.isSet === "boolean"
+          ? dataSource.specialEvent.isSet
+          : Boolean(dataSource.specialEvent.date)
+    };
+  }
 
   const mergedProfiles = ensureProfilesExist(dataSource);
   if (!sameDay) {
@@ -452,21 +490,25 @@ function applySharedSnapshot(dataSource) {
 
   state.userProfiles = mergedProfiles;
   state.missDayKey = todayKey;
-  state.lastMissTime =
-    typeof dataSource.lastMissTime === "string" ? dataSource.lastMissTime : null;
+  if (typeof dataSource.lastMissTime === "string") {
+    state.lastMissTime = dataSource.lastMissTime;
+  }
 
-  state.messages = Array.isArray(dataSource.messages)
-    ? normalizeMessagesForRole(dataSource.messages)
-    : [];
+  // Bulutta mesaj/anı varsa ve yerel listeden boş değilse koru
+  if (Array.isArray(dataSource.messages)) {
+    state.messages = normalizeMessagesForRole(dataSource.messages);
+  }
 
-  state.memories = Array.isArray(dataSource.memories)
-    ? JSON.parse(JSON.stringify(dataSource.memories))
-    : [];
+  if (Array.isArray(dataSource.memories)) {
+    state.memories = JSON.parse(JSON.stringify(dataSource.memories));
+  }
 
-  state.typingByRole = {
-    userA: Boolean(dataSource.typingByRole?.userA),
-    userB: Boolean(dataSource.typingByRole?.userB)
-  };
+  if (dataSource.typingByRole && typeof dataSource.typingByRole === "object") {
+    state.typingByRole = {
+      userA: Boolean(dataSource.typingByRole.userA),
+      userB: Boolean(dataSource.typingByRole.userB)
+    };
+  }
 
   syncRoleViewFields();
 }
@@ -550,22 +592,24 @@ export function buildPersistPayload() {
   };
 }
 
-function flushSaveNow(shouldPushCloud) {
+async function flushSaveNow(shouldPushCloud) {
   try {
     syncRoleViewFields();
     const payload = buildPersistPayload();
-    const serialized = JSON.stringify(payload);
     try {
-      localStorage.setItem(STORAGE_KEY, serialized);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
-      // Kota dolarsa ana iş parçacığını bloklama
+      // Kota aşılırsa yerel yazımı atla, buluta yazmaya devam et
     }
     if (shouldPushCloud && !suppressNextCloudPush) {
-      return set(ref(db, SHARED_ROOM_PATH), payload).catch(() => {});
+      const role = getDeviceRole();
+      if (role) {
+        await ensureRoleFirebaseAuth(role);
+      }
+      await set(ref(db, SHARED_ROOM_PATH), payload);
     }
-    return Promise.resolve();
   } catch {
-    return Promise.resolve();
+    // Sessiz geç
   }
 }
 
@@ -592,6 +636,8 @@ export function saveState(options = { pushCloud: true, immediate: false }) {
 
 export async function writeCallSignal(signalData) {
   try {
+    const role = getDeviceRole();
+    if (role) await ensureRoleFirebaseAuth(role);
     await set(ref(db, CALL_SIGNAL_PATH), signalData);
   } catch {
     // Sessiz geç
@@ -656,6 +702,11 @@ export function isPartnerTyping() {
 export function initRealtimeSync(onRemoteUpdate) {
   if (cloudListenerStarted) return;
   cloudListenerStarted = true;
+
+  const role = getDeviceRole();
+  if (role) {
+    ensureRoleFirebaseAuth(role).catch(() => {});
+  }
 
   const roomRef = ref(db, SHARED_ROOM_PATH);
   onValue(roomRef, (snapshot) => {
