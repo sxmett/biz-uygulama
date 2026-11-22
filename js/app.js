@@ -183,6 +183,7 @@ export function openPasscodeLockOverlay(onUnlocked) {
   const toggleBtn = document.getElementById("toggle-passcode-visibility");
   const errorEl = document.getElementById("passcode-error-msg");
   const formEl = document.getElementById("passcode-unlock-form");
+  const submitBtn = document.getElementById("passcode-submit-btn");
 
   toggleBtn?.addEventListener("click", () => {
     if (!inputEl) return;
@@ -208,8 +209,12 @@ export function openPasscodeLockOverlay(onUnlocked) {
 
   setTimeout(() => inputEl?.focus(), 60);
 
-  formEl?.addEventListener("submit", (e) => {
+  let isSubmitting = false;
+
+  formEl?.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     const matchedRole = resolveRoleFromPasscode(inputEl?.value || "");
 
     if (!matchedRole) {
@@ -219,9 +224,26 @@ export function openPasscodeLockOverlay(onUnlocked) {
       return;
     }
 
-    setDeviceRole(matchedRole);
-    overlay.remove();
-    onUnlocked?.();
+    isSubmitting = true;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = "0.75";
+      submitBtn.textContent = "Giriş yapılıyor...";
+    }
+
+    try {
+      await setDeviceRole(matchedRole);
+      overlay.remove();
+      onUnlocked?.();
+    } catch {
+      isSubmitting = false;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = "1";
+        submitBtn.textContent = "Giriş Yap";
+      }
+      if (errorEl) errorEl.textContent = "Bağlantı sağlanamadı, lütfen tekrar deneyin.";
+    }
   });
 }
 
