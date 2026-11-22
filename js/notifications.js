@@ -1,199 +1,252 @@
-import { db, ref, set, onValue } from "./firebase.js";
-import { getDeviceRole } from "./state.js";
+import { getDeviceRole, requestNotificationPermissionSafe } from "./state.js";
 
-export const VAPID_PUBLIC_KEY =
-  "BPkDBt0hY4a7NfX8i-anz8C9Lc6F_jv1kNya-5kGI1n982zn09LqnZabrHqZXJArosWpCeNWIVp8vq6C5YsQXg";
+const SW_REGISTRATION_TIMEOUT_MS = 3500;
+const PUSH_SERVER_ENDPOINT = "/api/push/send";
 
-function showInAppAlertBanner({ kind, title, body, onOpen }) {
+let activeAlertCallback = null;
+let pushSetupDone = false;
+
+function isSecurePushContext() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return (
+    window.isSecureContext ||
+    host === "localhost" ||
+    host === "127.0.0.1"
+  );
+}
+
+function withTimeout(promise, ms, fallbackValue = null) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(fallbackValue);
+      }
+    }, ms);
+
+    promise
+      .then((res) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(res);
+        }
+      })
+      .catch(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(fallbackValue);
+        }
+      });
+  });
+}
+
+function playIncomingTone(kind = "message") {
+  if (!getDeviceRole()) return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const isCall = kind === "voice_call" || kind === "video_call";
+    const notes = isCall ? [587.33, 783.99, 587.33, 880] : [659.25, 880];
+
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+
+      gain.gain.setValueAtTime(0.001, now + idx * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.08, now + idx * 0.14 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.14 + 0.12);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + idx * 0.14);
+      osc.stop(now + idx * 0.14 + 0.13);
+    });
+
+    if (navigator.vibrate) {
+      navigator.vibrate(isCall ? [200, 100, 200, 100, 250] : [120, 60, 120]);
+    }
+
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 900);
+  } catch {
+    // Ses çalma engellenirse sessiz geç
+  }
+}
+
+export function showInAppAlertBanner({ title, body, kind = "message", onOpen }) {
+  if (!getDeviceRole()) return;
+
   document.getElementById("in-app-alert-banner")?.remove();
 
   const banner = document.createElement("div");
   banner.id = "in-app-alert-banner";
-  const isCall = kind === "voice_call" || kind === "video_call";
-
-  banner.style.cssText = `
-    position: fixed;
-    top: 14px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: calc(100% - 28px);
-    max-width: 420px;
-    z-index: 10000;
-    background: ${isCall ? "linear-gradient(135deg, #1f2937, #111827)" : "#ffffff"};
-    color: ${isCall ? "#ffffff" : "#1c191d"};
-    border: 1px solid ${isCall ? "rgba(255,255,255,0.16)" : "rgba(230,46,101,0.25)"};
-    border-radius: 18px;
-    padding: 14px 16px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    cursor: pointer;
-    font-family: inherit;
-  `;
-
+  banner.className = "in-app-alert";
   banner.innerHTML = `
-    <div style="min-width:0;flex:1;">
-      <div style="font-size:13px;font-weight:700;margin-bottom:2px;">${title || "Yeni Bildirim"}</div>
-      <div style="font-size:12.5px;opacity:0.88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${body || ""}</div>
+    <div class="in-app-alert-text">
+      <div class="in-app-alert-title">${title}</div>
+      <div class="in-app-alert-body">${body}</div>
     </div>
-    <button type="button" id="close-in-app-alert" style="
-      border:none;
-      background:${isCall ? "rgba(255,255,255,0.14)" : "#fff0f5"};
-      color:${isCall ? "#ffffff" : "#d61c4e"};
-      border-radius:10px;
-      padding:6px 10px;
-      font-weight:700;
-      cursor:pointer;
-    ">Kapat</button>
+    <div class="in-app-alert-actions">
+      <button type="button" class="in-app-alert-btn primary" id="alert-open-btn">Aç</button>
+      <button type="button" class="in-app-alert-btn" id="alert-dismiss-btn">Kapat</button>
+    </div>
   `;
 
   document.body.appendChild(banner);
+  playIncomingTone(kind);
 
-  const timer = setTimeout(() => {
-    banner.remove();
-  }, isCall ? 15000 : 5000);
+  const dismiss = () => banner.remove();
 
-  banner.addEventListener("click", (e) => {
-    if (e.target?.id === "close-in-app-alert") {
-      clearTimeout(timer);
-      banner.remove();
-      return;
+  document.getElementById("alert-dismiss-btn")?.addEventListener("click", dismiss);
+  document.getElementById("alert-open-btn")?.addEventListener("click", () => {
+    dismiss();
+    if (typeof onOpen === "function") {
+      onOpen();
+    } else if (typeof activeAlertCallback === "function") {
+      activeAlertCallback({ kind, title, body });
     }
-    clearTimeout(timer);
-    banner.remove();
-    onOpen?.();
   });
+
+  setTimeout(() => {
+    if (document.getElementById("in-app-alert-banner") === banner) {
+      banner.remove();
+    }
+  }, 6500);
 }
 
-export async function dispatchNotificationEvent({ kind = "message", title = "", body = "", callId = "" }) {
-  const senderRole = getDeviceRole() || "userA";
-  const targetRole = senderRole === "userA" ? "userB" : "userA";
-  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+async function triggerSystemNotification({ title, body, tag, data }) {
+  if (!getDeviceRole()) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+    return;
+  }
 
   try {
-    await set(ref(db, `biz_room/push_queue/${id}`), {
-      id,
-      senderRole,
-      targetRole,
-      kind,
+    if ("serviceWorker" in navigator) {
+      const reg = await withTimeout(
+        navigator.serviceWorker.getRegistration(),
+        SW_REGISTRATION_TIMEOUT_MS,
+        null
+      );
+      if (reg && typeof reg.showNotification === "function") {
+        await reg.showNotification(title, {
+          body,
+          tag: tag || "biz-app-alert",
+          renotify: true,
+          data: data || {}
+        });
+        return;
+      }
+    }
+  } catch {
+    // Fallback olarak doğrudan Notification API kullan
+  }
+
+  try {
+    const n = new Notification(title, {
+      body,
+      tag: tag || "biz-app-alert"
+    });
+    n.onclick = () => {
+      window.focus();
+      if (typeof activeAlertCallback === "function") {
+        activeAlertCallback(data || {});
+      }
+      n.close();
+    };
+  } catch {
+    // Sessiz geç
+  }
+}
+
+async function sendBackgroundPushToServer(payload) {
+  if (!getDeviceRole()) return;
+  try {
+    await withTimeout(
+      fetch(PUSH_SERVER_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }),
+      2500,
+      null
+    );
+  } catch {
+    // Sunucu endpointi yoksa sessiz geç
+  }
+}
+
+export function dispatchNotificationEvent({ kind = "message", title, body, callId = null }) {
+  if (!getDeviceRole()) return;
+
+  const payload = {
+    kind,
+    title,
+    body,
+    callId,
+    ts: Date.now()
+  };
+
+  sendBackgroundPushToServer(payload);
+
+  const appVisible = document.visibilityState === "visible" && document.hasFocus();
+  if (appVisible) {
+    showInAppAlertBanner({
       title,
       body,
-      callId,
-      createdAt: Date.now()
+      kind,
+      onOpen: () => {
+        if (typeof activeAlertCallback === "function") {
+          activeAlertCallback(payload);
+        }
+      }
     });
-  } catch (err) {
-    console.warn("Push kuyruğuna yazılamadı:", err);
+  } else {
+    triggerSystemNotification({
+      title,
+      body,
+      tag: kind === "message" ? "biz-chat-msg" : `biz-call-${callId || Date.now()}`,
+      data: payload
+    });
   }
 }
 
 export async function setupPushNotifications({ onIncomingAlert } = {}) {
-  let swRegistration = null;
+  activeAlertCallback = onIncomingAlert || null;
+  if (!getDeviceRole()) return;
 
-  try {
+  if (!pushSetupDone) {
+    pushSetupDone = true;
+
     if ("serviceWorker" in navigator) {
-      swRegistration = await navigator.serviceWorker.register("/sw.js");
-    }
-  } catch (err) {
-    console.warn("Service Worker kaydı yapılamadı:", err);
-  }
-
-  try {
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      await Notification.requestPermission();
-    }
-  } catch (err) {
-    console.warn("Bildirim izni alınamadı:", err);
-  }
-
-  try {
-    const firebaseAppMod = await import("./firebase.js");
-    const messagingMod = await import(
-      "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js"
-    );
-
-    if (
-      firebaseAppMod.app &&
-      typeof Notification !== "undefined" &&
-      Notification.permission === "granted" &&
-      VAPID_PUBLIC_KEY &&
-      !VAPID_PUBLIC_KEY.startsWith("BURAYA_")
-    ) {
-      let messaging = null;
-      try {
-        messaging = messagingMod.getMessaging(firebaseAppMod.app);
-      } catch {
-        messaging = null;
-      }
-
-      if (messaging) {
-        const token = await messagingMod.getToken(messaging, {
-          vapidKey: VAPID_PUBLIC_KEY,
-          serviceWorkerRegistration: swRegistration || undefined
-        });
-
-        const myRole = getDeviceRole() || "userA";
-        if (token) {
-          await set(ref(db, `biz_room/push_tokens/${myRole}`), {
-            token,
-            updatedAt: Date.now()
-          });
+      navigator.serviceWorker.addEventListener("message", (event) => {
+        if (!getDeviceRole()) return;
+        const msg = event.data;
+        if (msg && msg.type === "PUSH_CLICK" && typeof activeAlertCallback === "function") {
+          activeAlertCallback(msg.payload || {});
         }
-
-        messagingMod.onMessage(messaging, (payload) => {
-          const data = payload?.data || {};
-          const kind = data.kind || "message";
-          const title = payload?.notification?.title || data.title || "Yeni Bildirim";
-          const body = payload?.notification?.body || data.body || "";
-
-          if (document.visibilityState === "visible") {
-            showInAppAlertBanner({
-              kind,
-              title,
-              body,
-              onOpen: () => onIncomingAlert?.(kind, data)
-            });
-          } else if (swRegistration?.showNotification) {
-            swRegistration.showNotification(title, {
-              body,
-              tag: kind.includes("call") ? "biz-incoming-call" : `biz-fg-${Date.now()}`,
-              renotify: true,
-              requireInteraction: kind.includes("call"),
-              data: { url: "/" }
-            });
-          }
-        });
-      }
+      });
     }
-  } catch {
-    // Bu ortamda FCM desteklenmiyorsa sessizce geç
   }
 
-  const myRole = getDeviceRole() || "userA";
-  const seenIds = new Set();
-  const bootTime = Date.now();
+  if (isSecurePushContext() && typeof Notification !== "undefined") {
+    if (Notification.permission === "default") {
+      await requestNotificationPermissionSafe();
+    }
+  }
+}
 
-  onValue(ref(db, "biz_room/push_queue"), (snapshot) => {
-    const val = snapshot.val();
-    if (!val || typeof val !== "object") return;
-
-    Object.values(val).forEach((item) => {
-      if (!item || typeof item !== "object" || !item.id) return;
-      if (seenIds.has(item.id)) return;
-      seenIds.add(item.id);
-
-      if (item.targetRole !== myRole) return;
-      if (Number(item.createdAt || 0) < bootTime - 2000) return;
-
-      if (document.visibilityState === "visible") {
-        showInAppAlertBanner({
-          kind: item.kind || "message",
-          title: item.title || "Yeni Bildirim",
-          body: item.body || "",
-          onOpen: () => onIncomingAlert?.(item.kind, item)
-        });
-      }
-    });
-  });
+export function teardownPushNotifications() {
+  activeAlertCallback = null;
+  document.getElementById("in-app-alert-banner")?.remove();
 }
