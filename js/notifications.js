@@ -1,60 +1,27 @@
-import {
-  db,
-  ref,
-  set,
-  push,
-  getMessaging,
-  getToken,
-  onMessage
-} from "./firebase.js";
+import { db, ref, set, push } from "./firebase.js";
 import {
   getDeviceRole,
   getPartnerRole,
   requestNotificationPermissionSafe
 } from "./state.js";
 
-const SW_REGISTRATION_TIMEOUT_MS = 4000;
-const VAPID_PUBLIC_KEY = "BPkDBt0hY4a7NfX8i-anz8C9Lc6F_jv1kNya-5kGI1n982zn09LQnZabrHqZXJArosWpCeNWIVp8vq6C5YsXQXg";
-
 let activeAlertCallback = null;
-let pushSetupDone = false;
+let nativeListenersBound = false;
 
-function isSecurePushContext() {
-  if (typeof window === "undefined") return false;
-  const host = window.location.hostname;
-  return (
-    window.isSecureContext ||
-    host === "localhost" ||
-    host === "127.0.0.1"
-  );
-}
-
-function withTimeout(promise, ms, fallbackValue = null) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        resolve(fallbackValue);
-      }
-    }, ms);
-
-    promise
-      .then((res) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(res);
-        }
-      })
-      .catch(() => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(fallbackValue);
-        }
-      });
-  });
+function getCapacitorLocalNotifications() {
+  try {
+    const cap = typeof window !== "undefined" ? window.Capacitor : null;
+    if (!cap || typeof cap.isNativePlatform !== "function" || !cap.isNativePlatform()) {
+      return null;
+    }
+    const ln = cap.Plugins?.LocalNotifications;
+    if (!ln || typeof ln.schedule !== "function") {
+      return null;
+    }
+    return ln;
+  } catch {
+    return null;
+  }
 }
 
 function playIncomingTone(kind = "message") {
@@ -93,7 +60,7 @@ function playIncomingTone(kind = "message") {
       ctx.close().catch(() => {});
     }, 900);
   } catch {
-    // Ses çalma engellenirse sessiz geç
+    // Sessiz geç
   }
 }
 
@@ -138,46 +105,55 @@ export function showInAppAlertBanner({ title, body, kind = "message", onOpen }) 
   }, 6500);
 }
 
-async function registerSwAndSaveToken() {
-  const myRole = getDeviceRole();
-  if (!myRole || !isSecurePushContext() || !("serviceWorker" in navigator)) {
-    return;
+export async function showPhoneNotificationPanel({ title, body, kind = "message", callId = null }) {
+  if (!getDeviceRole()) return;
+  const isCall = kind === "voice_call" || kind === "video_call";
+  const safeTitle =
+    title ||
+    (kind === "video_call"
+      ? "📹 Görüntülü Arama"
+      : kind === "voice_call"
+      ? "📞 Sesli Arama"
+      : "💬 Yeni Mesaj");
+  const safeBody = body || (isCall ? "Seni arıyor..." : "Yeni bir mesajın var.");
+
+  const localNotif = getCapacitorLocalNotifications();
+  if (localNotif) {
+    try {
+      await localNotif.schedule({
+        notifications: [
+          {
+            id: Math.floor(Date.now() % 2147483000),
+            title: safeTitle,
+            body: safeBody,
+            schedule: { at: new Date(Date.now() + 100) },
+            sound: isCall ? "beep.wav" : undefined,
+            extra: {
+              kind,
+              callId: callId || "",
+              tab: "sohbet"
+            }
+          }
+        ]
+      });
+      return;
+    } catch {
+      // Yerel bildirim hatasında sessiz geç
+    }
   }
 
-  try {
-    const reg = await withTimeout(
-      navigator.serviceWorker.register("./sw.js", { scope: "./" }),
-      SW_REGISTRATION_TIMEOUT_MS,
-      null
-    );
-    if (!reg) return;
-
-    if (typeof Notification === "undefined" || Notification.permission !== "granted") {
-      return;
-    }
-
-    const messaging = getMessaging();
-    if (!messaging || !VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.startsWith("BURAYA_")) {
-      return;
-    }
-
-    const token = await withTimeout(
-      getToken(messaging, {
-        vapidKey: VAPID_PUBLIC_KEY,
-        serviceWorkerRegistration: reg
-      }),
-      SW_REGISTRATION_TIMEOUT_MS,
-      null
-    );
-
-    if (token) {
-      await set(ref(db, `biz_room/push_tokens/${myRole}`), {
-        token,
-        updatedAt: Date.now()
-      });
-    }
-  } catch {
-    // Sessiz geç
+  // Telefon tarayıcısında/PWA'da açıksa ve uygulama görünür değilse uygulama içi/sistem uyarısı
+  if (document.visibilityState !== "visible") {
+    showInAppAlertBanner({
+      title: safeTitle,
+      body: safeBody,
+      kind,
+      onOpen: () => {
+        if (typeof activeAlertCallback === "function") {
+          activeAlertCallback({ kind, title: safeTitle, body: safeBody, callId });
+        }
+      }
+    });
   }
 }
 
@@ -213,63 +189,46 @@ export function dispatchNotificationEvent({ kind = "message", title, body, callI
     ts: Date.now()
   };
 
-  // Worker'ın dinlediği kuyruğa push isteği gönder
+  // Sadece karşı tarafa kuyruk yaz (kendine veya Google'a bildirim basma)
   enqueuePushToPartner(payload);
-
-  const appVisible = document.visibilityState === "visible" && document.hasFocus();
-  if (appVisible) {
-    showInAppAlertBanner({
-      title,
-      body,
-      kind,
-      onOpen: () => {
-        if (typeof activeAlertCallback === "function") {
-          activeAlertCallback(payload);
-        }
-      }
-    });
-  }
 }
 
 export async function setupPushNotifications({ onIncomingAlert } = {}) {
   activeAlertCallback = onIncomingAlert || null;
   if (!getDeviceRole()) return;
 
-  if (isSecurePushContext() && typeof Notification !== "undefined") {
-    if (Notification.permission === "default") {
-      await requestNotificationPermissionSafe();
-    }
-  }
-
-  await registerSwAndSaveToken();
-
-  if (!pushSetupDone) {
-    pushSetupDone = true;
-
+  const localNotif = getCapacitorLocalNotifications();
+  if (localNotif) {
     try {
-      const messaging = getMessaging();
-      onMessage(messaging, (payload) => {
-        if (!getDeviceRole()) return;
-        const data = payload.data || {};
-        const notif = payload.notification || {};
-        const title = data.title || notif.title || "Yeni Bildirim";
-        const body = data.body || notif.body || "";
-        const kind = data.kind || "message";
-
-        showInAppAlertBanner({
-          title,
-          body,
-          kind,
-          onOpen: () => {
-            if (typeof activeAlertCallback === "function") {
-              activeAlertCallback({ kind, title, body, callId: data.callId || "" });
-            }
-          }
-        });
-      });
+      if (typeof localNotif.checkPermissions === "function" && typeof localNotif.requestPermissions === "function") {
+        const perm = await localNotif.checkPermissions();
+        if (perm?.display !== "granted") {
+          await localNotif.requestPermissions();
+        }
+      }
     } catch {
       // Sessiz geç
     }
+
+    if (!nativeListenersBound && typeof localNotif.addListener === "function") {
+      nativeListenersBound = true;
+      localNotif.addListener("localNotificationActionPerformed", (event) => {
+        if (!getDeviceRole()) return;
+        const extra = event?.notification?.extra || {};
+        if (typeof activeAlertCallback === "function") {
+          activeAlertCallback({
+            kind: extra.kind || "message",
+            callId: extra.callId || ""
+          });
+        }
+      });
+    }
+    return;
+  }
+
+  // Tarayıcı ortamındaysa yalnızca izin durumunu kontrol et (Google/Web Push aboneliği açma)
+  if (typeof Notification !== "undefined" && Notification.permission === "default") {
+    await requestNotificationPermissionSafe();
   }
 }
 
