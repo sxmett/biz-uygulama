@@ -128,8 +128,11 @@ export function renderBiz(contentEl) {
   clearBizClock();
   syncDailyMissReset();
 
+  const myLabel = state.myName || "Samet";
+  const partnerLabel = state.partnerName || "Emine";
   const { days, hours, minutes, seconds } = getElapsedTime();
   const daysLeft = getDaysUntilSpecialEvent();
+  const activeMood = state.myMood || "Uyuyor";
 
   const editPanelHtml = isEditingCouple
     ? `
@@ -142,7 +145,7 @@ export function renderBiz(contentEl) {
               id="my-name-input"
               class="msg-input plain-input"
               placeholder="Adın"
-              value="${state.myName}"
+              value="${myLabel.replace(/"/g, "&quot;")}"
             />
             <div class="profile-photo-row">
               <label class="tool-btn" style="cursor:pointer;">
@@ -151,21 +154,14 @@ export function renderBiz(contentEl) {
               </label>
               ${
                 state.myAvatar
-                  ? `<button type="button" class="tool-btn" id="remove-my-avatar">Fotoğrafı Kaldır</button>`
+                  ? `<button type="button" class="tool-btn" id="remove-my-avatar">Kaldır</button>`
                   : ""
               }
             </div>
           </div>
 
           <div class="profile-edit-col">
-            <div class="label" style="margin:0;">Sevgilinin Adı ve Fotoğrafı</div>
-            <input
-              type="text"
-              id="partner-name-input"
-              class="msg-input plain-input"
-              placeholder="Sevgilinin adı"
-              value="${state.partnerName}"
-            />
+            <div class="label" style="margin:0;">${partnerLabel} Fotoğrafı</div>
             <div class="profile-photo-row">
               <label class="tool-btn" style="cursor:pointer;">
                 Fotoğraf Seç
@@ -173,7 +169,7 @@ export function renderBiz(contentEl) {
               </label>
               ${
                 state.partnerAvatar
-                  ? `<button type="button" class="tool-btn" id="remove-partner-avatar">Fotoğrafı Kaldır</button>`
+                  ? `<button type="button" class="tool-btn" id="remove-partner-avatar">Kaldır</button>`
                   : ""
               }
             </div>
@@ -181,7 +177,7 @@ export function renderBiz(contentEl) {
         </div>
 
         <div class="date-edit-row">
-          <label for="start-date-input" class="label" style="margin:0;">Sevgili Olduğumuz Tarih ve Saat</label>
+          <label for="start-date-input" class="label" style="margin:0;">Birlikte Başladığımız Tarih</label>
           <input
             type="datetime-local"
             id="start-date-input"
@@ -192,17 +188,17 @@ export function renderBiz(contentEl) {
 
         <div class="profile-edit-grid">
           <div class="profile-edit-col">
-            <label for="special-event-title-input" class="label" style="margin:0;">Yaklaşan Özel Gün Adı</label>
+            <label for="special-event-title-input" class="label" style="margin:0;">Özel Gün Adı</label>
             <input
               type="text"
               id="special-event-title-input"
               class="msg-input plain-input"
-              placeholder="Örn: Yıldönümü, Doğum Günü"
+              placeholder="Örn: Yıldönümü"
               value="${(state.specialEvent?.title || "").replace(/"/g, "&quot;")}"
             />
           </div>
           <div class="profile-edit-col">
-            <label for="special-event-date-input" class="label" style="margin:0;">Yaklaşan Özel Gün Tarihi</label>
+            <label for="special-event-date-input" class="label" style="margin:0;">Özel Gün Tarihi</label>
             <input
               type="date"
               id="special-event-date-input"
@@ -224,23 +220,25 @@ export function renderBiz(contentEl) {
     <div class="hero-card">
       <div class="hero-top">
         <div class="couple-avatars">
-          ${renderAvatarWithCount(state.myName, state.myAvatar, state.myMissCount || 0, "my-miss-count")}
+          ${renderAvatarWithCount(myLabel, state.myAvatar, state.myMissCount || 0, "my-miss-count")}
           <span class="couple-heart">♥</span>
           ${renderAvatarWithCount(
-            state.partnerName,
+            partnerLabel,
             state.partnerAvatar,
             state.partnerMissCount || 0,
             "partner-miss-count"
           )}
           <div>
-            <strong>${state.myName} & ${state.partnerName}</strong>
+            <strong>${myLabel} & ${partnerLabel}</strong>
             <div class="peer-sub">Birlikte geçen zaman</div>
           </div>
         </div>
+
         <div class="hero-top-actions">
           <button type="button" class="tool-btn" id="toggle-couple-edit">${
             isEditingCouple ? "Kapat" : "Düzenle"
           }</button>
+          <button type="button" class="tool-btn" id="refresh-app-btn" title="Uygulamayı Yenile">Yenile</button>
           <button type="button" class="tool-btn" id="logout-role-btn">Çıkış</button>
         </div>
       </div>
@@ -255,30 +253,38 @@ export function renderBiz(contentEl) {
 
     <div class="grid-two">
       <div class="card">
-        <div class="label">Onun Modu</div>
+        <div class="label">${partnerLabel} Modu</div>
         <strong>${state.partnerMood || "Belirtilmedi"}</strong>
-        <div class="sub-metric">Mesafe: ${Number(state.distanceKm).toFixed(1)} km</div>
+        <div class="sub-metric">Mesafe: ${Number(state.distanceKm || 0).toFixed(1)} km</div>
       </div>
 
       <div class="card">
-        <div class="label">Yaklaşan Özel Gün</div>
-        <strong>${state.specialEvent.title}</strong>
-        <div class="sub-metric">${daysLeft} gün kaldı</div>
+        <div class="label">${state.specialEvent.title}</div>
+        <strong>${daysLeft} gün kaldı</strong>
+        <div class="sub-metric">Yaklaşan özel gün</div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="label">Senin Notun</div>
-      <strong>${state.myNote || "Henüz not eklenmedi."}</strong>
-      <div class="mini-row">
-        <input
-          type="text"
-          id="my-note-input"
-          class="msg-input plain-input"
-          placeholder="Kısa bir not bırak..."
-          value="${(state.myNote || "").replace(/"/g, "&quot;")}"
-        />
-        <button type="button" class="mini-btn" id="save-note-btn">Kaydet</button>
+    <div class="card notes-stack">
+      <div>
+        <div class="label">Senin Notun</div>
+        <div class="mini-row" style="margin-top:6px;">
+          <input
+            type="text"
+            id="my-note-input"
+            class="msg-input plain-input"
+            placeholder="Notunu yaz..."
+            value="${(state.myNote || "").replace(/"/g, "&quot;")}"
+          />
+          <button type="button" class="mini-btn" id="save-note-btn">Kaydet</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="label">${partnerLabel}'nin Notu</div>
+        <div class="partner-note-box">${
+          state.partnerNote ? state.partnerNote : `${partnerLabel} henüz not bırakmadı.`
+        }</div>
       </div>
     </div>
 
@@ -287,13 +293,14 @@ export function renderBiz(contentEl) {
       <div class="mood-grid">
         ${state.moods
           .map(
-            (m) => `<button class="nav-btn ${state.partnerMood === m ? "active" : ""}" data-mood="${m}">${m}</button>`
+            (m) =>
+              `<button type="button" class="nav-btn ${activeMood === m ? "active" : ""}" data-mood="${m}">${m}</button>`
           )
           .join("")}
       </div>
     </div>
 
-    <button class="primary-btn" id="miss-btn">Özledim Sinyali Gönder</button>
+    <button type="button" class="primary-btn" id="miss-btn">Özledim Sinyali Gönder</button>
     <div id="miss-feedback">
       ${state.lastMissTime ? `<div class="toast">Son sinyal: ${state.lastMissTime}</div>` : ""}
     </div>
@@ -324,6 +331,11 @@ export function renderBiz(contentEl) {
     renderBiz(contentEl);
   });
 
+  document.getElementById("refresh-app-btn").addEventListener("click", () => {
+    saveState({ pushCloud: true });
+    window.location.reload();
+  });
+
   document.getElementById("logout-role-btn").addEventListener("click", () => {
     openLogoutConfirmModal();
   });
@@ -346,7 +358,7 @@ export function renderBiz(contentEl) {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        state.partnerAvatar = reader.result;
+        state.userProfiles.userB.avatar = reader.result;
         saveState({ pushCloud: true });
         renderBiz(contentEl);
       };
@@ -360,7 +372,7 @@ export function renderBiz(contentEl) {
     });
 
     document.getElementById("remove-partner-avatar")?.addEventListener("click", () => {
-      state.partnerAvatar = null;
+      state.userProfiles.userB.avatar = null;
       saveState({ pushCloud: true });
       renderBiz(contentEl);
     });
@@ -403,17 +415,16 @@ export function renderBiz(contentEl) {
       isEditingCouple = false;
       saveState({ pushCloud: true });
       renderBiz(contentEl);
-      showToast("miss-feedback", "Profil, tarih ve özel gün güncellendi.");
+      showToast("miss-feedback", "Güncellemeler kaydedildi.");
     });
   }
 
   document.getElementById("save-note-btn").addEventListener("click", () => {
     const val = document.getElementById("my-note-input").value.trim();
-    if (!val) return;
     writeMyProfileChanges({ note: val });
     saveState({ pushCloud: true });
     renderBiz(contentEl);
-    showToast("miss-feedback", "Notun güncellendi.");
+    showToast("miss-feedback", val ? "Notun güncellendi ve paylaşıldı." : "Notun temizlendi.");
   });
 
   document.querySelectorAll("[data-mood]").forEach((btn) => {
