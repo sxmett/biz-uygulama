@@ -5,6 +5,7 @@ const LEGACY_KEYS = ["biz_app_state_v1", "biz_app_state_v2"];
 const ADMIN_OWNER_KEY = "biz_admin_owner_v1";
 const DEVICE_ROLE_KEY = "biz_device_role_v1";
 const SHARED_ROOM_PATH = "biz_room/shared_state";
+const CALL_SIGNAL_PATH = "biz_room/call_signal";
 
 export function getLocalDayKey(dateObj = new Date()) {
   const y = dateObj.getFullYear();
@@ -24,9 +25,12 @@ function createEmptyUserProfile(role) {
     lastSeenAt: 0,
     location: {
       lat: null,
+      lng: null,
       lon: null,
+      address: "",
       label: "Henüz paylaşılmadı",
-      updatedAt: "Henüz güncellenmedi"
+      updatedAt: "Henüz güncellenmedi",
+      ts: 0
     },
     missCount: 0
   };
@@ -62,15 +66,21 @@ export const defaultState = {
   bizClockInterval: null,
   myLocation: {
     lat: null,
+    lng: null,
     lon: null,
+    address: "",
     label: "Henüz paylaşılmadı",
-    updatedAt: "Henüz güncellenmedi"
+    updatedAt: "Henüz güncellenmedi",
+    ts: 0
   },
   partnerLocation: {
     lat: null,
+    lng: null,
     lon: null,
+    address: "",
     label: "Henüz paylaşılmadı",
-    updatedAt: "Henüz güncellenmedi"
+    updatedAt: "Henüz güncellenmedi",
+    ts: 0
   },
   distanceKm: 0,
   emojiPickerOpen: false,
@@ -113,6 +123,39 @@ export function getPartnerRole(role = getDeviceRole()) {
   return role === "userB" ? "userA" : "userB";
 }
 
+function normalizeLocationObj(loc) {
+  const base = {
+    lat: null,
+    lng: null,
+    lon: null,
+    address: "",
+    label: "Henüz paylaşılmadı",
+    updatedAt: "Henüz güncellenmedi",
+    ts: 0
+  };
+  if (!loc || typeof loc !== "object") return base;
+  const rawLat = Number(loc.lat);
+  const rawLng = Number(loc.lng ?? loc.lon);
+  const hasValid =
+    Number.isFinite(rawLat) &&
+    Number.isFinite(rawLng) &&
+    !(rawLat === 0 && rawLng === 0);
+
+  const lat = hasValid ? rawLat : null;
+  const lng = hasValid ? rawLng : null;
+  const address = String(loc.address || loc.label || "").trim();
+
+  return {
+    lat,
+    lng,
+    lon: lng,
+    address: address || (hasValid ? `${lat.toFixed(6)}, ${lng.toFixed(6)}` : ""),
+    label: address || (hasValid ? `${lat.toFixed(6)}, ${lng.toFixed(6)}` : "Henüz paylaşılmadı"),
+    updatedAt: loc.updatedAt || "Henüz güncellenmedi",
+    ts: Number(loc.ts || 0)
+  };
+}
+
 function ensureProfilesExist(source) {
   const baseA = createEmptyUserProfile("userA");
   const baseB = createEmptyUserProfile("userB");
@@ -123,12 +166,12 @@ function ensureProfilesExist(source) {
     userA: {
       ...baseA,
       ...rawA,
-      location: { ...baseA.location, ...(rawA.location || {}) }
+      location: normalizeLocationObj(rawA.location)
     },
     userB: {
       ...baseB,
       ...rawB,
-      location: { ...baseB.location, ...(rawB.location || {}) }
+      location: normalizeLocationObj(rawB.location)
     }
   };
 }
@@ -152,30 +195,30 @@ export function syncRoleViewFields() {
   state.partnerMood = partner.mood || "Uyuyor";
   state.partnerOnline = Boolean(partner.online);
   state.partnerLastSeen = partner.lastSeen || "Henüz görülmedi";
-  state.myLocation = { ...me.location };
-  state.partnerLocation = { ...partner.location };
+  state.myLocation = normalizeLocationObj(me.location);
+  state.partnerLocation = normalizeLocationObj(partner.location);
   state.myMissCount = Number(me.missCount) || 0;
   state.partnerMissCount = Number(partner.missCount) || 0;
   state.missCount = state.myMissCount + state.partnerMissCount;
 
   const hasMyCoords =
     typeof state.myLocation.lat === "number" &&
-    typeof state.myLocation.lon === "number" &&
+    typeof state.myLocation.lng === "number" &&
     Number.isFinite(state.myLocation.lat) &&
-    Number.isFinite(state.myLocation.lon);
+    Number.isFinite(state.myLocation.lng);
 
   const hasPartnerCoords =
     typeof state.partnerLocation.lat === "number" &&
-    typeof state.partnerLocation.lon === "number" &&
+    typeof state.partnerLocation.lng === "number" &&
     Number.isFinite(state.partnerLocation.lat) &&
-    Number.isFinite(state.partnerLocation.lon);
+    Number.isFinite(state.partnerLocation.lng);
 
   if (hasMyCoords && hasPartnerCoords) {
     state.distanceKm = calculateDistanceKm(
       state.myLocation.lat,
-      state.myLocation.lon,
+      state.myLocation.lng,
       state.partnerLocation.lat,
-      state.partnerLocation.lon
+      state.partnerLocation.lng
     );
   } else {
     state.distanceKm = 0;
@@ -191,8 +234,8 @@ export function writeMyProfileChanges(patch = {}) {
     ...current,
     ...patch,
     location: patch.location
-      ? { ...current.location, ...patch.location }
-      : { ...current.location }
+      ? normalizeLocationObj({ ...current.location, ...patch.location })
+      : normalizeLocationObj(current.location)
   };
 
   state.userProfiles = profiles;
@@ -208,8 +251,8 @@ export function writePartnerProfileChanges(patch = {}) {
     ...current,
     ...patch,
     location: patch.location
-      ? { ...current.location, ...patch.location }
-      : { ...current.location }
+      ? normalizeLocationObj({ ...current.location, ...patch.location })
+      : normalizeLocationObj(current.location)
   };
 
   state.userProfiles = profiles;
@@ -287,12 +330,17 @@ function loadSavedState() {
 function normalizeMessagesForRole(rawMessages) {
   const myRole = getDeviceRole() || "userA";
   if (!Array.isArray(rawMessages)) return [];
+  const todayKey = getLocalDayKey();
   return rawMessages.map((msg) => {
     const authorRole = msg.authorRole || (msg.sender === "me" ? "userA" : "userB");
+    const createdAt = Number(msg.createdAt || msg.id || Date.now());
+    const dateKey = msg.dateKey || getLocalDayKey(new Date(createdAt || Date.now()));
     return {
       ...msg,
       authorRole,
-      sender: authorRole === myRole ? "me" : "them"
+      sender: authorRole === myRole ? "me" : "them",
+      createdAt,
+      dateKey: dateKey || todayKey
     };
   });
 }
@@ -325,7 +373,6 @@ function applySharedSnapshot(dataSource) {
     mergedProfiles.userB.missCount = 0;
   }
 
-  // Kendi online durumumuzu koruyarak buluttan gelen veriyi uygula
   const myRole = getDeviceRole();
   if (myRole && state.userProfiles?.[myRole]) {
     mergedProfiles[myRole].online = Boolean(state.userProfiles[myRole].online);
@@ -390,6 +437,7 @@ syncRoleViewFields();
 
 let suppressNextCloudPush = false;
 let cloudListenerStarted = false;
+let callSignalListenerStarted = false;
 
 export function syncDailyMissReset() {
   const currentKey = getLocalDayKey();
@@ -439,12 +487,30 @@ export function saveState(options = { pushCloud: true }) {
     const payload = buildPersistPayload();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     if (options.pushCloud !== false && !suppressNextCloudPush) {
-      set(ref(db, SHARED_ROOM_PATH), payload).catch(() => {});
+      return set(ref(db, SHARED_ROOM_PATH), payload).catch(() => {});
     }
-    return true;
+    return Promise.resolve();
   } catch {
-    return false;
+    return Promise.resolve();
   }
+}
+
+export async function writeCallSignal(signalData) {
+  try {
+    await set(ref(db, CALL_SIGNAL_PATH), signalData);
+  } catch {
+    // Sessiz geç
+  }
+}
+
+export function initCallSignalListener(onSignal) {
+  if (callSignalListenerStarted) return;
+  callSignalListenerStarted = true;
+
+  onValue(ref(db, CALL_SIGNAL_PATH), (snapshot) => {
+    const val = snapshot.val();
+    onSignal?.(val || null);
+  });
 }
 
 export function setMyPresence(isOnline) {
@@ -619,10 +685,25 @@ export async function requestMediaPermissionSafe(mode = "voice") {
     return { ok: false, stream: null, reason: "unsupported" };
   }
 
+  const audioConstraints =
+    mode === "voice"
+      ? {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1
+        }
+      : {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        };
+
   const constraints =
     mode === "video"
-      ? { audio: true, video: { facingMode: "user" } }
-      : { audio: true, video: false };
+      ? { audio: audioConstraints, video: { facingMode: "user" } }
+      : { audio: audioConstraints, video: false };
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
