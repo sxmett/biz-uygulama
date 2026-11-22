@@ -2,6 +2,7 @@ import {
   state,
   setAdminOwner,
   initRealtimeSync,
+  initCallSignalListener,
   getDeviceRole,
   setDeviceRole,
   resolveRoleFromPasscode,
@@ -9,11 +10,18 @@ import {
   setMyTypingStatus
 } from "./state.js";
 import { renderBiz, clearBizClock } from "./biz.js";
-import { renderSohbet, markIncomingMessagesAsRead } from "./sohbet.js";
+import {
+  renderSohbet,
+  markIncomingMessagesAsRead,
+  refreshChatHeaderPresenceOnly,
+  handleIncomingCallSignal
+} from "./sohbet.js";
 import { renderKonum } from "./konum.js";
 import { renderAnilar } from "./anilar.js";
 import { renderAdmin } from "./admin.js";
 import { setupPushNotifications } from "./notifications.js";
+
+let prevMessageCount = state.messages.length;
 
 export function openPasscodeLockOverlay(onUnlocked) {
   document.getElementById("passcode-lock-overlay")?.remove();
@@ -272,6 +280,8 @@ export function renderApp() {
   } else if (state.activeTab === "admin") {
     renderAdmin(contentEl, () => renderApp());
   }
+
+  prevMessageCount = state.messages.length;
 }
 
 function bindPresenceLifecycle() {
@@ -319,29 +329,48 @@ function startAppAfterRoleReady() {
     }
   });
 
+  initCallSignalListener((signal) => {
+    if (!getDeviceRole()) return;
+    const contentEl = document.getElementById("app-content") || document.getElementById("content");
+    handleIncomingCallSignal(signal, contentEl);
+  });
+
   initRealtimeSync(() => {
     if (!getDeviceRole()) return;
     const contentEl = document.getElementById("app-content") || document.getElementById("content");
     if (!contentEl) return;
 
+    const hasNewMessages = state.messages.length !== prevMessageCount;
+    prevMessageCount = state.messages.length;
+
     if (state.activeTab === "sohbet") {
       markIncomingMessagesAsRead();
-      const keepFocus = document.activeElement?.id === "msg-input";
+      const inputFocused = document.activeElement?.id === "msg-input";
       const panel = document.getElementById("messages-panel");
+
+      if (!hasNewMessages && inputFocused && panel) {
+        refreshChatHeaderPresenceOnly();
+        return;
+      }
+
       const nearBottom = panel
         ? panel.scrollHeight - panel.scrollTop - panel.clientHeight < 90
         : true;
-      renderSohbet(contentEl, keepFocus, {
+      renderSohbet(contentEl, inputFocused, {
         scrollToBottom: nearBottom,
         preserveScroll: !nearBottom
       });
     } else if (state.activeTab === "biz") {
-      // Kullanıcı Biz sekmesinde not/profil düzenliyorsa kutuyu bozmadan güncelle
       const isTypingInBiz = ["my-note-input", "my-name-input", "special-event-title-input"].includes(
         document.activeElement?.id || ""
       );
       if (!isTypingInBiz) {
         renderBiz(contentEl);
+      }
+    } else if (state.activeTab === "konum") {
+      const fetchingBtn = document.getElementById("btn-fetch-location");
+      if (!fetchingBtn || !fetchingBtn.disabled) {
+        renderKonum(contentEl);
       }
     } else {
       renderApp();
