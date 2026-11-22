@@ -4,7 +4,9 @@ import {
   initRealtimeSync,
   getDeviceRole,
   setDeviceRole,
-  resolveRoleFromPasscode
+  resolveRoleFromPasscode,
+  setMyPresence,
+  setMyTypingStatus
 } from "./state.js";
 import { renderBiz, clearBizClock } from "./biz.js";
 import { renderSohbet, markIncomingMessagesAsRead } from "./sohbet.js";
@@ -272,7 +274,42 @@ export function renderApp() {
   }
 }
 
+function bindPresenceLifecycle() {
+  setMyPresence(true);
+
+  document.addEventListener("visibilitychange", () => {
+    if (!getDeviceRole()) return;
+    if (document.visibilityState === "visible") {
+      setMyPresence(true);
+    } else {
+      setMyTypingStatus(false);
+      setMyPresence(false);
+    }
+  });
+
+  window.addEventListener("pagehide", () => {
+    if (!getDeviceRole()) return;
+    setMyTypingStatus(false);
+    setMyPresence(false);
+  });
+
+  window.addEventListener("beforeunload", () => {
+    if (!getDeviceRole()) return;
+    setMyTypingStatus(false);
+    setMyPresence(false);
+  });
+}
+
+let presenceBound = false;
+
 function startAppAfterRoleReady() {
+  if (!presenceBound) {
+    presenceBound = true;
+    bindPresenceLifecycle();
+  } else {
+    setMyPresence(true);
+  }
+
   renderApp();
 
   setupPushNotifications({
@@ -284,12 +321,27 @@ function startAppAfterRoleReady() {
 
   initRealtimeSync(() => {
     if (!getDeviceRole()) return;
+    const contentEl = document.getElementById("app-content") || document.getElementById("content");
+    if (!contentEl) return;
+
     if (state.activeTab === "sohbet") {
       markIncomingMessagesAsRead();
-      const contentEl = document.getElementById("app-content") || document.getElementById("content");
-      if (contentEl) {
-        const keepFocus = document.activeElement?.id === "msg-input";
-        renderSohbet(contentEl, keepFocus, { scrollToBottom: true, preserveScroll: false });
+      const keepFocus = document.activeElement?.id === "msg-input";
+      const panel = document.getElementById("messages-panel");
+      const nearBottom = panel
+        ? panel.scrollHeight - panel.scrollTop - panel.clientHeight < 90
+        : true;
+      renderSohbet(contentEl, keepFocus, {
+        scrollToBottom: nearBottom,
+        preserveScroll: !nearBottom
+      });
+    } else if (state.activeTab === "biz") {
+      // Kullanıcı Biz sekmesinde not/profil düzenliyorsa kutuyu bozmadan güncelle
+      const isTypingInBiz = ["my-note-input", "my-name-input", "special-event-title-input"].includes(
+        document.activeElement?.id || ""
+      );
+      if (!isTypingInBiz) {
+        renderBiz(contentEl);
       }
     } else {
       renderApp();
