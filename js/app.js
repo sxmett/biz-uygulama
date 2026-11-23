@@ -354,7 +354,6 @@ function bindPresenceLifecycle() {
 
 function notifyIfBackgroundMessage() {
   if (!getDeviceRole()) return;
-  if (document.visibilityState === "visible") return;
   if (!Array.isArray(state.messages) || state.messages.length === 0) return;
 
   const latest = state.messages[state.messages.length - 1];
@@ -364,11 +363,15 @@ function notifyIfBackgroundMessage() {
   if (!msgKey || msgKey === lastNotifiedMsgId) return;
   lastNotifiedMsgId = msgKey;
 
+  if (document.visibilityState === "visible" && state.activeTab === "sohbet") {
+    return;
+  }
+
   const senderTitle = state.partnerName || "Yeni Mesaj";
   const previewText =
-    latest.type === "voice"
+    latest.type === "audio"
       ? "🎤 Sesli mesaj gönderdi"
-      : latest.type === "photo"
+      : latest.type === "image"
       ? "📷 Fotoğraf gönderdi"
       : latest.text || "Yeni bir mesajın var.";
 
@@ -384,23 +387,22 @@ function notifyIfBackgroundCall(signal) {
   const myRole = getDeviceRole();
   const isIncoming =
     signal.status === "ringing" &&
-    signal.fromRole &&
-    signal.fromRole !== myRole;
+    signal.calleeRole === myRole &&
+    signal.callerRole &&
+    signal.callerRole !== myRole;
   if (!isIncoming) return;
 
   const callKey = String(signal.callId || signal.updatedAt || signal.ts || "");
   if (!callKey || callKey === lastNotifiedCallKey) return;
   lastNotifiedCallKey = callKey;
 
-  if (document.visibilityState !== "visible") {
-    const isVideo = signal.mode === "video" || signal.kind === "video_call";
-    showPhoneNotificationPanel({
-      title: isVideo ? "📹 Görüntülü Arama" : "📞 Sesli Arama",
-      body: `${state.partnerName || "Sevgilin"} seni arıyor...`,
-      kind: isVideo ? "video_call" : "voice_call",
-      callId: signal.callId || null
-    });
-  }
+  const isVideo = signal.mode === "video" || signal.kind === "video_call";
+  showPhoneNotificationPanel({
+    title: isVideo ? "📹 Görüntülü Arama" : "📞 Sesli Arama",
+    body: `${signal.callerName || state.partnerName || "Sevgilin"} seni arıyor...`,
+    kind: isVideo ? "video_call" : "voice_call",
+    callId: signal.callId || null
+  });
 }
 
 let presenceBound = false;
