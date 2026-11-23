@@ -376,7 +376,7 @@ function notifyIfBackgroundMessage() {
       : latest.text || "Yeni bir mesajın var.";
 
   showPhoneNotificationPanel({
-    title: `💬 ${senderTitle}`,
+    title: senderTitle,
     body: previewText,
     kind: "message"
   });
@@ -398,7 +398,7 @@ function notifyIfBackgroundCall(signal) {
 
   const isVideo = signal.mode === "video" || signal.kind === "video_call";
   showPhoneNotificationPanel({
-    title: isVideo ? "📹 Görüntülü Arama" : "📞 Sesli Arama",
+    title: isVideo ? "Görüntülü Arama" : "Sesli Arama",
     body: `${signal.callerName || state.partnerName || "Sevgilin"} seni arıyor...`,
     kind: isVideo ? "video_call" : "voice_call",
     callId: signal.callId || null
