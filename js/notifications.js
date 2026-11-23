@@ -1,13 +1,8 @@
 import { db, ref, set, push } from "./firebase.js";
-import {
-  getDeviceRole,
-  getPartnerRole,
-  requestNotificationPermissionSafe
-} from "./state.js";
+import { getDeviceRole, getPartnerRole } from "./state.js";
 
 let activeAlertCallback = null;
 let nativeListenersBound = false;
-let currentFcmToken = null;
 
 function getCapacitor() {
   return typeof window !== "undefined" ? window.Capacitor || null : null;
@@ -26,15 +21,9 @@ function isNativeAndroid() {
 
 function getCapacitorLocalNotifications() {
   try {
-    const cap = getCapacitor();
-    if (!cap || typeof cap.isNativePlatform !== "function" || !cap.isNativePlatform()) {
-      return null;
-    }
-    const ln = cap.Plugins?.LocalNotifications;
-    if (!ln || typeof ln.schedule !== "function") {
-      return null;
-    }
-    return ln;
+    if (!isNativeAndroid()) return null;
+    const ln = getCapacitor()?.Plugins?.LocalNotifications;
+    return ln && typeof ln.schedule === "function" ? ln : null;
   } catch {
     return null;
   }
@@ -42,25 +31,24 @@ function getCapacitorLocalNotifications() {
 
 function getCapacitorPushNotifications() {
   try {
-    const cap = getCapacitor();
-    if (!cap || typeof cap.isNativePlatform !== "function" || !cap.isNativePlatform()) {
-      return null;
-    }
-    return cap.Plugins?.PushNotifications || null;
+    if (!isNativeAndroid()) return null;
+    const pn = getCapacitor()?.Plugins?.PushNotifications;
+    return pn && typeof pn.register === "function" ? pn : null;
   } catch {
     return null;
   }
 }
 
 export async function savePushTokenToDb(token) {
+  if (!isNativeAndroid()) return;
   const myRole = getDeviceRole();
   if (!myRole || !token || typeof token !== "string") return;
-  currentFcmToken = token.trim();
-  if (!currentFcmToken) return;
+  const cleanToken = token.trim();
+  if (!cleanToken) return;
 
   try {
     await set(ref(db, `biz_room/push_tokens/${myRole}`), {
-      token: currentFcmToken,
+      token: cleanToken,
       role: myRole,
       platform: "android",
       updatedAt: Date.now()
@@ -71,12 +59,13 @@ export async function savePushTokenToDb(token) {
 }
 
 async function ensureAndroidNotificationChannels(localNotif, pushNotif) {
+  if (!isNativeAndroid()) return;
   const channels = [
     {
       id: "biz_messages_channel",
       name: "Mesajlar",
       description: "Yeni sohbet mesajı bildirimleri",
-      importance: 4, // HIGH
+      importance: 4,
       visibility: 1,
       vibration: true
     },
@@ -84,7 +73,7 @@ async function ensureAndroidNotificationChannels(localNotif, pushNotif) {
       id: "biz_calls_channel",
       name: "Sesli ve Görüntülü Aramalar",
       description: "Gelen arama bildirimleri",
-      importance: 5, // MAX
+      importance: 5,
       visibility: 1,
       vibration: true
     }
@@ -94,16 +83,12 @@ async function ensureAndroidNotificationChannels(localNotif, pushNotif) {
     if (localNotif && typeof localNotif.createChannel === "function") {
       try {
         await localNotif.createChannel(ch);
-      } catch {
-        // Kanal zaten varsa geç
-      }
+      } catch {}
     }
     if (pushNotif && typeof pushNotif.createChannel === "function") {
       try {
         await pushNotif.createChannel(ch);
-      } catch {
-        // Kanal zaten varsa geç
-      }
+      } catch {}
     }
   }
 }
@@ -136,16 +121,14 @@ function playIncomingTone(kind = "message") {
       osc.stop(now + idx * 0.14 + 0.13);
     });
 
-    if (navigator.vibrate) {
+    if (isNativeAndroid() && navigator.vibrate) {
       navigator.vibrate(isCall ? [300, 120, 300, 120, 350] : [140, 60, 140]);
     }
 
     setTimeout(() => {
       ctx.close().catch(() => {});
     }, 950);
-  } catch {
-    // Sessiz geç
-  }
+  } catch {}
 }
 
 export function showInAppAlertBanner({ title, body, kind = "message", callId = null, onOpen }) {
@@ -153,35 +136,88 @@ export function showInAppAlertBanner({ title, body, kind = "message", callId = n
 
   document.getElementById("in-app-alert-banner")?.remove();
 
+  const isCall = kind === "voice_call" || kind === "video_call";
+  const badgeIcon = kind === "video_call" ? "📹" : kind === "voice_call" ? "📞" : "💬";
+  const cleanTitle = String(title || "Yeni Bildirim").replace(/^(💬|📞|📹)\s*/, "");
+
   const banner = document.createElement("div");
   banner.id = "in-app-alert-banner";
   banner.className = "in-app-alert";
   banner.style.cssText = `
     position: fixed;
-    top: 14px;
-    left: 14px;
-    right: 14px;
+    top: max(12px, env(safe-area-inset-top));
+    left: 12px;
+    right: 12px;
     z-index: 99998;
-    background: #ffffff;
-    border: 1px solid #f0dce2;
-    border-left: 4px solid #e11d48;
-    border-radius: 16px;
+    background: rgba(24, 24, 28, 0.94);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
     padding: 12px 14px;
-    box-shadow: 0 14px 32px rgba(24, 16, 24, 0.18);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
+    color: #ffffff;
+    font-family: inherit;
+    animation: slideDownToast 0.22s ease-out;
   `;
 
+  if (!document.getElementById("biz-toast-anim-style")) {
+    const style = document.createElement("style");
+    style.id = "biz-toast-anim-style";
+    style.textContent = `
+      @keyframes slideDownToast {
+        from { opacity: 0; transform: translateY(-14px) scale(0.98); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   banner.innerHTML = `
-    <div style="min-width:0;flex:1;">
-      <div style="font-weight:800;font-size:0.9rem;color:#22222b;">${title}</div>
-      <div style="font-size:0.82rem;color:#6e7180;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${body}</div>
+    <div style="
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: ${isCall ? "linear-gradient(135deg, #22c55e, #16a34a)" : "linear-gradient(135deg, #ff4d7d, #e11d48)"};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 19px;
+      flex-shrink: 0;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+    ">${badgeIcon}</div>
+    <div style="min-width:0;flex:1;cursor:pointer;" id="alert-body-click">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span style="font-weight:700;font-size:13.5px;color:#ffffff;letter-spacing:-0.2px;">${cleanTitle}</span>
+        <span style="font-size:11px;color:rgba(255,255,255,0.55);font-weight:600;">şimdi</span>
+      </div>
+      <div style="font-size:12.5px;color:rgba(255,255,255,0.78);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">${body || ""}</div>
     </div>
-    <div style="display:flex;gap:6px;flex-shrink:0;">
-      <button type="button" class="mini-btn" id="alert-open-btn" style="background:#e11d48;color:#fff;border-color:#e11d48;">Aç</button>
-      <button type="button" class="mini-btn" id="alert-dismiss-btn">Kapat</button>
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+      <button type="button" id="alert-open-btn" style="
+        border:none;
+        border-radius:12px;
+        padding:7px 11px;
+        font-size:12px;
+        font-weight:700;
+        background:#ff4d7d;
+        color:#fff;
+        cursor:pointer;
+      ">${isCall ? "Yanıtla" : "Aç"}</button>
+      <button type="button" id="alert-dismiss-btn" aria-label="Kapat" style="
+        border:none;
+        border-radius:12px;
+        width:30px;
+        height:30px;
+        font-size:13px;
+        font-weight:700;
+        background:rgba(255,255,255,0.1);
+        color:rgba(255,255,255,0.8);
+        cursor:pointer;
+      ">✕</button>
     </div>
   `;
 
@@ -189,48 +225,66 @@ export function showInAppAlertBanner({ title, body, kind = "message", callId = n
   playIncomingTone(kind);
 
   const dismiss = () => banner.remove();
-
-  document.getElementById("alert-dismiss-btn")?.addEventListener("click", dismiss);
-  document.getElementById("alert-open-btn")?.addEventListener("click", () => {
+  const openAction = () => {
     dismiss();
     if (typeof onOpen === "function") {
-      onOpen({ kind, title, body, callId });
+      onOpen({ kind, title: cleanTitle, body, callId });
     } else if (typeof activeAlertCallback === "function") {
-      activeAlertCallback({ kind, title, body, callId });
+      activeAlertCallback({ kind, title: cleanTitle, body, callId });
     }
+  };
+
+  document.getElementById("alert-dismiss-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dismiss();
   });
+  document.getElementById("alert-open-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openAction();
+  });
+  document.getElementById("alert-body-click")?.addEventListener("click", openAction);
 
   setTimeout(() => {
     if (document.getElementById("in-app-alert-banner") === banner) {
       banner.remove();
     }
-  }, 7000);
+  }, isCall ? 12000 : 5500);
 }
 
 export async function showPhoneNotificationPanel({ title, body, kind = "message", callId = null }) {
   if (!getDeviceRole()) return;
+
+  // PC/Web tarayıcıda Windows bildirim paneli basma; sadece uygulama içi şık kart göster
+  if (!isNativeAndroid()) {
+    if (document.visibilityState === "visible") {
+      showInAppAlertBanner({
+        title,
+        body,
+        kind,
+        callId,
+        onOpen: (info) => activeAlertCallback?.(info)
+      });
+    }
+    return;
+  }
+
   const isCall = kind === "voice_call" || kind === "video_call";
   const safeTitle =
     title ||
     (kind === "video_call"
-      ? "📹 Görüntülü Arama"
+      ? "Görüntülü Arama"
       : kind === "voice_call"
-      ? "📞 Sesli Arama"
-      : "💬 Yeni Mesaj");
+      ? "Sesli Arama"
+      : "Yeni Mesaj");
   const safeBody = body || (isCall ? "Seni arıyor..." : "Yeni bir mesajın var.");
 
-  // Uygulama ön planda görünürse uygulama içi banner + ses/titreşim ver
   if (document.visibilityState === "visible") {
     showInAppAlertBanner({
       title: safeTitle,
       body: safeBody,
       kind,
       callId,
-      onOpen: (info) => {
-        if (typeof activeAlertCallback === "function") {
-          activeAlertCallback(info);
-        }
-      }
+      onOpen: (info) => activeAlertCallback?.(info)
     });
     return;
   }
@@ -255,23 +309,8 @@ export async function showPhoneNotificationPanel({ title, body, kind = "message"
           }
         ]
       });
-      return;
-    } catch {
-      // Sessiz geç
-    }
+    } catch {}
   }
-
-  showInAppAlertBanner({
-    title: safeTitle,
-    body: safeBody,
-    kind,
-    callId,
-    onOpen: (info) => {
-      if (typeof activeAlertCallback === "function") {
-        activeAlertCallback(info);
-      }
-    }
-  });
 }
 
 async function enqueuePushToPartner(payload) {
@@ -290,9 +329,7 @@ async function enqueuePushToPartner(payload) {
       callId: payload.callId || "",
       createdAt: Date.now()
     });
-  } catch {
-    // Sessiz geç
-  }
+  } catch {}
 }
 
 export function dispatchNotificationEvent({ kind = "message", title, body, callId = null }) {
@@ -311,16 +348,20 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
   activeAlertCallback = onIncomingAlert || null;
   if (!getDeviceRole()) return;
 
+  // Sadece gerçek Android APK üzerinde push token al ve kaydet
+  if (!isNativeAndroid()) return;
+
   const localNotif = getCapacitorLocalNotifications();
   const pushNotif = getCapacitorPushNotifications();
 
-  if (isNativeAndroid()) {
-    await ensureAndroidNotificationChannels(localNotif, pushNotif);
-  }
+  await ensureAndroidNotificationChannels(localNotif, pushNotif);
 
   if (pushNotif) {
     try {
-      if (typeof pushNotif.checkPermissions === "function" && typeof pushNotif.requestPermissions === "function") {
+      if (
+        typeof pushNotif.checkPermissions === "function" &&
+        typeof pushNotif.requestPermissions === "function"
+      ) {
         const perm = await pushNotif.checkPermissions();
         if (perm?.receive !== "granted") {
           await pushNotif.requestPermissions();
@@ -335,10 +376,6 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
           if (tokenValue) {
             await savePushTokenToDb(tokenValue);
           }
-        });
-
-        pushNotif.addListener("registrationError", () => {
-          // Sessiz geç
         });
 
         pushNotif.addListener("pushNotificationReceived", async (notification) => {
@@ -372,9 +409,7 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
                   }
                 ]
               });
-            } catch {
-              // Sessiz geç
-            }
+            } catch {}
           }
         });
 
@@ -388,12 +423,8 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
         });
       }
 
-      if (typeof pushNotif.register === "function") {
-        await pushNotif.register();
-      }
-    } catch {
-      // Sessiz geç
-    }
+      await pushNotif.register();
+    } catch {}
   }
 
   if (localNotif && typeof localNotif.addListener === "function") {
@@ -406,13 +437,7 @@ export async function setupPushNotifications({ onIncomingAlert } = {}) {
           callId: extra.callId || ""
         });
       });
-    } catch {
-      // Sessiz geç
-    }
-  }
-
-  if (typeof Notification !== "undefined" && Notification.permission === "default") {
-    await requestNotificationPermissionSafe();
+    } catch {}
   }
 }
 
